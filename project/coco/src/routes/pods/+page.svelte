@@ -78,7 +78,7 @@
 	function clearFilter() { goto('/pods'); }
 
 	let form = $state({
-		name: '', namespace: 'default', image: 'nginx:alpine', runtime: '',
+		name: '', namespace: 'default', image: 'docker.m.daocloud.io/library/nginx:alpine', runtime: '',
 		command: 'sleep 3600', args: '', cpu_req: '100m', mem_req: '128Mi',
 		cpu_lim: '500m', mem_lim: '256Mi', labels: '', port: '80'
 	});
@@ -214,7 +214,7 @@
 
 <div class="toolbar">
 	<div class="btns">
-		<button onclick={()=>{form={name:'',namespace:'default',image:'nginx:alpine',runtime:'',command:'sleep 3600',args:'',cpu_req:'100m',mem_req:'128Mi',cpu_lim:'500m',mem_lim:'256Mi',labels:'',port:'80'};showForm=!showForm;msg='';formTab='basic'}} class="btn-primary">➕ 创建 Pod</button>
+		<button onclick={()=>{form={name:'',namespace:'default',image:'docker.m.daocloud.io/library/nginx:alpine',runtime:'',command:'sleep 3600',args:'',cpu_req:'100m',mem_req:'128Mi',cpu_lim:'500m',mem_lim:'256Mi',labels:'',port:'80'};showForm=!showForm;msg='';formTab='basic'}} class="btn-primary">➕ 创建 Pod</button>
 		<button onclick={quickTdx} class="btn-tdx">🛡️ 快速 TDX</button>
 		<button onclick={load} class="btn-refresh" title="刷新">🔄</button>
 	</div>
