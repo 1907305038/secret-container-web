@@ -1,0 +1,43 @@
+# OS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node
+node_modules/
+project/coco/node_modules/
+
+# Frontend build artifacts
+project/coco/dist/
+project/coco-serve/dist/
+
+# Embedded backend binary
+project/coco-serve/coco-serve
+
+# Editor / IDE
+.vscode/
+*.swp
+
+# Env
+.env
+.env.local
+
+# Go
+*.test
+vendor/
+
+# Misc
+*.tmp
+*.bak
+*.cache
+__pycache__/
+
+# Ignore system files
+Thumbs.db
+
+# Optional: local logs
+/var/log/coco-serve.log
