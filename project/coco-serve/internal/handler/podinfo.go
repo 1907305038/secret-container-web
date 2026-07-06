@@ -313,26 +313,28 @@ func GetProcMem(c *gin.Context) {
 	}
 
 	// 尝试 ptrace attach + 读取内存
-	memData, ptraceErr := readWithPtrace(pidInt)
+	memResult, ptraceErr := readWithPtraceEx(pidInt)
 
-	if ptraceErr == nil && len(memData) > 0 {
-		hexStr := fmt.Sprintf("%x", memData)
+	if ptraceErr == nil && len(memResult.data) > 0 {
+		data := memResult.data
+		hexStr := fmt.Sprintf("%x", data)
 		if len(hexStr) > 128 {
 			hexStr = hexStr[:128] + "..."
 		}
+		regionInfo := fmt.Sprintf("区域: %s (%s)", memResult.regionName, memResult.regionAddr)
 		if isQemu {
 			c.JSON(http.StatusOK, gin.H{
 				"pid":      pid,
-				"note":     fmt.Sprintf("✅ ptrace 读取成功 (%d bytes)，但这是 QEMU 虚拟机进程自身内存，非容器内进程", len(memData)),
+				"note":     fmt.Sprintf("✅ ptrace 读取成功 (%d bytes)，但这是 QEMU 虚拟机进程自身内存，非容器内进程", len(data)),
 				"tag":      tag,
-				"evidence": fmt.Sprintf("ptrace 读取 /proc/%s/mem → hex: %s | cmdline: %s", pid, hexStr, cmdStr),
+				"evidence": fmt.Sprintf("%s | hex: %s | cmdline: %s", regionInfo, hexStr, cmdStr),
 			})
 		} else {
 			c.JSON(http.StatusOK, gin.H{
 				"pid":      pid,
-				"note":     fmt.Sprintf("✅ ptrace 读取成功 (%d bytes) — 普通容器进程内存对宿主机可见", len(memData)),
+				"note":     fmt.Sprintf("✅ ptrace 读取成功 (%d bytes) — 普通容器进程内存对宿主机可见", len(data)),
 				"tag":      tag,
-				"evidence": fmt.Sprintf("ptrace 读取 /proc/%s/mem → hex: %s | cmdline: %s", pid, hexStr, cmdStr),
+				"evidence": fmt.Sprintf("%s | hex: %s | cmdline: %s", regionInfo, hexStr, cmdStr),
 			})
 		}
 		return
@@ -360,20 +362,43 @@ func GetProcMem(c *gin.Context) {
 	}
 }
 
-// readWithPtrace 使用 ptrace attach 后读取进程内存
+// memReadResult ptrace 内存读取结果
+type memReadResult struct {
+	data       []byte
+	regionName string
+	regionAddr string
+}
+
+// readWithPtrace 使用 ptrace attach 后读取进程内存（优先读栈/堆）
 func readWithPtrace(pid int) ([]byte, error) {
-	// 先找可读的内存区域
+	result, err := readWithPtraceEx(pid)
+	if err != nil {
+		return nil, err
+	}
+	return result.data, nil
+}
+
+// readWithPtraceEx 读取进程内存，先扫描 maps 找最佳区域（栈 > 堆 > rw匿名 > ro匿名）
+func readWithPtraceEx(pid int) (*memReadResult, error) {
 	mapsData, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
 	if err != nil {
 		return nil, fmt.Errorf("read maps: %w", err)
 	}
-	var startAddr int64
+
+	type candidate struct {
+		start, end int64
+		name, perm string
+	}
+	var stack, heap *candidate
+	var rwAnon, roAnon []candidate
+
 	for _, line := range strings.Split(string(mapsData), "\n") {
 		parts := strings.Fields(line)
-		if len(parts) < 2 {
+		if len(parts) < 5 {
 			continue
 		}
-		if !strings.Contains(parts[1], "r") {
+		perm := parts[1]
+		if !strings.Contains(perm, "r") {
 			continue
 		}
 		addrParts := strings.SplitN(parts[0], "-", 2)
@@ -382,28 +407,50 @@ func readWithPtrace(pid int) ([]byte, error) {
 		}
 		s, _ := strconv.ParseInt(addrParts[0], 16, 64)
 		e, _ := strconv.ParseInt(addrParts[1], 16, 64)
-		if e-s >= 128 {
-			startAddr = s
+		if e-s < 128 {
+			continue
+		}
+		name := parts[len(parts)-1]
+		c := candidate{s, e, name, perm}
+		if name == "[stack]" {
+			stack = &c
 			break
+		} else if name == "[heap]" {
+			heap = &c
+		} else if !strings.HasPrefix(name, "[") && !strings.HasPrefix(name, "/") {
+			if strings.Contains(perm, "w") {
+				rwAnon = append(rwAnon, c)
+			} else {
+				roAnon = append(roAnon, c)
+			}
 		}
 	}
-	if startAddr == 0 {
-		return nil, fmt.Errorf("no readable memory region found")
+
+	var chosen *candidate
+	var regionName string
+	switch {
+	case stack != nil:
+		chosen, regionName = stack, "stack"
+	case heap != nil:
+		chosen, regionName = heap, "heap"
+	case len(rwAnon) > 0:
+		chosen, regionName = &rwAnon[0], "rw-anon"
+	case len(roAnon) > 0:
+		chosen, regionName = &roAnon[0], "ro-anon"
+	default:
+		return nil, fmt.Errorf("no suitable memory region found")
 	}
 
-	// Attach 到目标进程
 	if err := unix.PtraceAttach(pid); err != nil {
 		return nil, fmt.Errorf("ptrace attach: %w", err)
 	}
 	defer unix.PtraceDetach(pid)
 
-	// 等待进程停止
 	var status unix.WaitStatus
 	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
 		return nil, fmt.Errorf("wait4: %w", err)
 	}
 
-	// 超时保护
 	done := make(chan struct{})
 	go func() {
 		time.Sleep(3 * time.Second)
@@ -414,7 +461,6 @@ func readWithPtrace(pid int) ([]byte, error) {
 		}
 	}()
 
-	// 从有效地址读取内存
 	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
 	if err != nil {
 		close(done)
@@ -423,10 +469,22 @@ func readWithPtrace(pid int) ([]byte, error) {
 	defer f.Close()
 
 	buf := make([]byte, 128)
-	n, err := f.ReadAt(buf, startAddr)
+	offset := chosen.start
+	// 栈向下增长，从末尾附近读；其他区域跳过第一页
+	if regionName == "stack" {
+		offset = chosen.end - 256
+	} else {
+		offset = chosen.start + 4096
+	}
+	n, err := f.ReadAt(buf, offset)
 	close(done)
 	if err != nil && n == 0 {
-		return nil, fmt.Errorf("read mem at 0x%x: %w", startAddr, err)
+		return nil, fmt.Errorf("read mem at 0x%x: %w", offset, err)
 	}
-	return buf[:n], nil
+
+	return &memReadResult{
+		data:       buf[:n],
+		regionName: regionName,
+		regionAddr: fmt.Sprintf("0x%x", offset),
+	}, nil
 }
