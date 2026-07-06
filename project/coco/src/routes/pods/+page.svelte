@@ -50,18 +50,21 @@
 				const evt: WsEvent = JSON.parse(e.data);
 				if (evt.type === 'pod_created') {
 					msg = `✅ ${String(evt.name || '')} 已创建，等待启动...`;
-					setTimeout(load, 2000);
+					setTimeout(load, 1500);
 				}
 				if (evt.type === 'pod_deleted') {
 					msg = `🗑️ ${String(evt.name || '')} 已删除`;
 					const key = (evt.namespace || 'default') + '/' + (evt.name || '');
-					deletingPods.add(key);
-					deletingPods = new Set(deletingPods);
-					setTimeout(() => {
-						deletingPods.delete(key);
+					// 仅当不是自己触发的删除时才处理
+					if (!deletingPods.has(key)) {
+						deletingPods.add(key);
 						deletingPods = new Set(deletingPods);
-						load();
-					}, 500);
+						setTimeout(() => {
+							deletingPods.delete(key);
+							deletingPods = new Set(deletingPods);
+							load();
+						}, 600);
+					}
 				}
 				if (evt.type === 'pod_phase' && evt.name && evt.namespace) {
 					const key = evt.namespace + '/' + evt.name;
@@ -181,20 +184,27 @@
 			const name = String(r.name || '');
 			const err = String(r.error || '');
 			msg = res.ok ? `✅ ${name} 已创建` : `❌ ${err}`;
-			if (res.ok) { showForm = false; setTimeout(load, 3000); }
+			if (res.ok) { showForm = false; setTimeout(load, 1500); }
 		} catch (e) {
 			msg = `❌ 创建失败: ${String(e)}`;
 		}
 	}
 	async function deletePod(ns: string, name: string) {
+		// 立即触发删除动画，不等网络响应
+		const key = ns + '/' + name;
+		deletingPods.add(key);
+		deletingPods = new Set(deletingPods);
 		msg = `删除 ${String(name)}...`;
 		try {
 			await fetch(`/api/pods/${ns}/${name}`, { method: 'DELETE' });
 			msg = `✅ ${String(name)} 已删除`;
 		} catch (e) {
 			msg = `❌ 删除失败: ${String(e)}`;
+			deletingPods.delete(key);
+			deletingPods = new Set(deletingPods);
 		}
-		setTimeout(load, 2000);
+		// 0.8 秒后刷新列表（等 K8s 完成清理）
+		setTimeout(() => { deletingPods.delete(key); deletingPods = new Set(deletingPods); load(); }, 800);
 	}
 	function quickTdx() {
 		form = { name: 'tdx-' + Date.now().toString(36), namespace: 'default', image: 'docker.m.daocloud.io/library/nginx:alpine', runtime: 'kata-qemu-tdx', command: 'sleep 3600', args: '', cpu_req: '100m', mem_req: '128Mi', cpu_lim: '500m', mem_lim: '256Mi', labels: '', port: '80' };
