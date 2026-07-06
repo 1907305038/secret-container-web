@@ -181,3 +181,41 @@ func (c *Client) GetRuntimeDetail(name string) (map[string]string, error) {
 	}
 	return info, nil
 }
+
+// EventItem K8s Event 摘要
+type EventItem struct {
+	Type      string `json:"type"`
+	Reason    string `json:"reason"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+}
+
+// GetPodEvents 获取 Pod 的 K8s Events（用于创建时间线）
+func (c *Client) GetPodEvents(namespace, podName string) ([]EventItem, error) {
+	events, err := c.cs.CoreV1().Events(namespace).List(context.TODO(), metav1.ListOptions{
+		FieldSelector: "involvedObject.name=" + podName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list events: %w", err)
+	}
+	var result []EventItem
+	for _, e := range events.Items {
+		ts := ""
+		if !e.LastTimestamp.IsZero() {
+			ts = e.LastTimestamp.Format("15:04:05")
+		} else if !e.FirstTimestamp.IsZero() {
+			ts = e.FirstTimestamp.Format("15:04:05")
+		}
+		result = append(result, EventItem{
+			Type:      e.Type,
+			Reason:    e.Reason,
+			Message:   e.Message,
+			Timestamp: ts,
+		})
+	}
+	// 按时间排序（K8s 返回可能是乱序的）
+	for i := 0; i < len(result)/2; i++ {
+		result[i], result[len(result)-1-i] = result[len(result)-1-i], result[i]
+	}
+	return result, nil
+}

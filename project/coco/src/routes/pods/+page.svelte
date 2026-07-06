@@ -4,7 +4,8 @@
 	import { quintOut, cubicOut } from 'svelte/easing';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import type { PodInfo } from '$lib/types';
+	import type { PodInfo, WsEvent, PodEvent, MemoryEncryptProof } from '$lib/types';
+	import HexDump from '$lib/components/HexDump.svelte';
 
 	let pods = $state<PodInfo[]>([]);
 	let total = $state(0); let confCount = $state(0);
@@ -15,6 +16,11 @@
 
 	let filterRuntime = $state('');
 	let filterNs = $state('');
+
+	// WebSocket 实时状态
+	let ws: WebSocket;
+	let podPhases = $state<Record<string, string>>({});
+	let deletingPods = $state<Set<string>>(new Set());
 
 	$effect(() => {
 		filterRuntime = $page.url.searchParams.get('runtime') || '';
@@ -35,7 +41,39 @@
 		pods = all.pods; total = all.total; confCount = conf.total;
 		loading = false;
 	}
-	onMount(load);
+
+	function connectWS() {
+		const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+		ws = new WebSocket(`${proto}//${location.host}/ws/state`);
+		ws.onmessage = (e) => {
+			try {
+				const evt: WsEvent = JSON.parse(e.data);
+				if (evt.type === 'pod_created') {
+					msg = `✅ ${evt.name} 已创建，等待启动...`;
+					setTimeout(load, 2000);
+				}
+				if (evt.type === 'pod_deleted') {
+					msg = `🗑️ ${evt.name} 已删除`;
+					const key = (evt.namespace || 'default') + '/' + (evt.name || '');
+					deletingPods.add(key);
+					deletingPods = new Set(deletingPods);
+					setTimeout(() => {
+						deletingPods.delete(key);
+						deletingPods = new Set(deletingPods);
+						load();
+					}, 500);
+				}
+				if (evt.type === 'pod_phase' && evt.name && evt.namespace) {
+					const key = evt.namespace + '/' + evt.name;
+					podPhases[key] = evt.phase || '';
+					podPhases = { ...podPhases };
+				}
+				if (evt.type === 'pod_count') { load(); }
+			} catch { /* ignore parse errors */ }
+		};
+		ws.onclose = () => { setTimeout(connectWS, 5000); };
+	}
+	onMount(() => { load(); connectWS(); return () => ws?.close(); });
 
 	function clearFilter() { goto('/pods'); }
 
@@ -64,6 +102,12 @@
 	let memResults = $state<Record<string,any>>({});
 	let yamlData = $state<Record<string,string>>({});
 
+	// K8s Events 时间线
+	let podEvents = $state<Record<string, PodEvent[]>>({});
+	// 内存加密验证
+	let encryptProofs = $state<Record<string, MemoryEncryptProof>>({});
+	let proofLoading = $state<Record<string, boolean>>({});
+
 	async function readMem(pid: number, ns?: string, pod?: string) {
 		const key = String(pid);
 		if (memResults[key]) { memResults[key] = null; memResults = { ...memResults }; return; }
@@ -82,6 +126,42 @@
 		yamlData = { ...yamlData };
 	}
 
+	// 获取 K8s Events 时间线
+	async function fetchEvents(ns: string, name: string) {
+		const key = `${ns}/${name}`;
+		if (podEvents[key]) return;
+		const r = await fetch(`/api/pods/${ns}/${name}/events`);
+		const d = await r.json();
+		podEvents[key] = d.events || [];
+		podEvents = { ...podEvents };
+	}
+
+	// 全自动内存加密验证
+	async function autoEncryptProof(ns: string, name: string) {
+		const key = `${ns}/${name}`;
+		proofLoading[key] = true;
+		proofLoading = { ...proofLoading };
+		const r = await fetch(`/api/demo/memory-encrypt?pod=${encodeURIComponent(name)}&ns=${encodeURIComponent(ns)}`);
+		const d = await r.json();
+		encryptProofs[key] = d;
+		encryptProofs = { ...encryptProofs };
+		proofLoading[key] = false;
+		proofLoading = { ...proofLoading };
+	}
+
+	// 半自动内存加密验证（指定宿主机 PID）
+	async function manualEncryptCompare(ns: string, name: string, pid: number) {
+		const key = `${ns}/${name}`;
+		proofLoading[key] = true;
+		proofLoading = { ...proofLoading };
+		const r = await fetch(`/api/demo/memory-compare?pod=${encodeURIComponent(name)}&ns=${encodeURIComponent(ns)}&pid=${pid}`);
+		const d = await r.json();
+		encryptProofs[key] = d;
+		encryptProofs = { ...encryptProofs };
+		proofLoading[key] = false;
+		proofLoading = { ...proofLoading };
+	}
+
 	async function toggleSys(ns: string, name: string) {
 		const key = `${ns}/${name}`;
 		if (expanded[key]) { expanded[key] = false; expanded = { ...expanded }; return; }
@@ -89,6 +169,8 @@
 		const res = await fetch(`/api/pods/info/${ns}/${name}`);
 		sysData[key] = await res.json();
 		sysData = { ...sysData };
+		// 同时获取 Events 时间线
+		fetchEvents(ns, name);
 	}
 
 	async function createPod() {
@@ -196,7 +278,9 @@
 <div class="list">
 	{#each pods as pod, i (pod.namespace + '/' + pod.name)}
 		{@const key = pod.namespace + '/' + pod.name}
-		<div class="card-wrapper" in:fly={{ y: 10, delay: i * 30, duration: 250 }}>
+		{@const phase = podPhases[key]}
+		{@const isDeleting = deletingPods.has(key)}
+		<div class="card-wrapper" class:deleting={isDeleting} in:fly={{ y: 10, delay: i * 30, duration: 250 }} out:fly={{ y: -10, duration: 200 }}>
 			<div class="card {isTdx(pod.runtime_class)?'tdx':''}" onclick="{() => toggleSys(pod.namespace,pod.name)}" role="button" tabindex="0">
 				<div class="card-left">
 					<span class="badge {isTdx(pod.runtime_class)?'tdx':'normal'}">{isTdx(pod.runtime_class)?'🟢 TDX':'⚪ 普通'}</span>
@@ -205,6 +289,9 @@
 					<div class="card-top">
 						<span class="name">{pod.name}</span>
 						<span class="ns">{pod.namespace}</span>
+						{#if phase && phase !== 'Running'}
+							<span class="phase-badge phase-{phase.toLowerCase()}">{phase}</span>
+						{/if}
 						<span class="status-dot {pod.status === 'Running' ? 'running' : ''}"></span>
 						<span class="status">{pod.status}</span>
 					</div>
@@ -280,6 +367,100 @@
 										</div>
 									{/if}
 								{/each}
+							{/if}
+						</div>
+					{/if}
+
+					<!-- K8s Events 时间线 -->
+					{#if podEvents[key]?.length}
+						<div class="timeline" in:fade={{ delay: 200 }}>
+							<div class="timeline-title">📜 生命周期</div>
+							{#each podEvents[key] as evt}
+								<div class="timeline-item">
+									<span class="tl-dot {evt.type === 'Warning' ? 'warn' : 'normal'}"></span>
+									<span class="tl-time">{evt.timestamp}</span>
+									<span class="tl-reason">{evt.reason}</span>
+									<span class="tl-msg">{evt.message}</span>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					<!-- 内存加密验证面板 (仅 TDX Pod) -->
+					{#if sysData[key]?.is_tdx}
+						<div class="encrypt-panel" in:fade={{ delay: 250 }}>
+							<div class="encrypt-header">
+								<span>🔐 内存加密验证</span>
+								<div class="encrypt-btns">
+									<button onclick={(e) => { e.stopPropagation(); autoEncryptProof(pod.namespace, pod.name); }}
+										disabled={proofLoading[key]}>
+										{proofLoading[key] ? '⏳ 验证中...' : '🔄 一键验证 (全自动)'}
+									</button>
+									{#if sysData[key].host_procs?.[0]?.pid}
+										<button onclick={(e) => { e.stopPropagation(); manualEncryptCompare(pod.namespace, pod.name, sysData[key].host_procs[0].pid); }}
+											disabled={proofLoading[key]}>
+											🔍 手动对比 (半自动)
+										</button>
+									{/if}
+								</div>
+							</div>
+
+							{#if encryptProofs[key]}
+								{@const proof = encryptProofs[key]}
+								{#if proof.error}
+									<div class="encrypt-error">{proof.error}</div>
+								{:else if proof.hint}
+									<div class="encrypt-hint">{proof.hint}</div>
+								{:else}
+									{#if proof.auto_mode && proof.plaintext}
+										<div class="encrypt-plaintext">
+											测试明文: <code>{proof.plaintext}</code>
+										</div>
+									{/if}
+									<div class="encrypt-compare">
+										<div class="encrypt-col host-col">
+											<div class="encrypt-col-title">🖥️ 宿主机视角 (Host)</div>
+											<div class="encrypt-col-sub">QEMU PID: {proof.qemu_pid}</div>
+											{#if proof.host_view.regions?.length}
+												{#each proof.host_view.regions as region}
+													<HexDump
+														hexData={region.hex_dump || ''}
+														asciiSafe={region.ascii_safe || ''}
+														label={region.name + ' ' + region.address}
+														entropy={region.entropy}
+														variant={region.readable ? 'cipher' : 'unknown'}
+													/>
+												{/each}
+											{/if}
+											<div class="encrypt-summary {proof.host_view.found ? 'found' : 'not-found'}">
+												{proof.host_view.note}
+											</div>
+										</div>
+										<div class="encrypt-col guest-col">
+											<div class="encrypt-col-title">📦 容器内视角 (Guest)</div>
+											<div class="encrypt-col-sub">kubectl exec</div>
+											{#if proof.guest_view.regions?.length}
+												{#each proof.guest_view.regions as region}
+													<HexDump
+														hexData={region.hex_dump || ''}
+														asciiSafe={region.ascii_safe || ''}
+														label={region.name}
+														entropy={region.entropy}
+														variant={region.readable ? 'plain' : 'unknown'}
+													/>
+												{/each}
+											{/if}
+											<div class="encrypt-summary {proof.guest_view.found ? 'found' : 'not-found'}">
+												{proof.guest_view.note}
+											</div>
+										</div>
+									</div>
+									{#if !proof.auto_mode}
+										<div class="encrypt-semi-hint">
+											💡 半自动模式：请在容器内执行 <code>echo "TEST" &gt; /dev/shm/proof.txt</code> 后使用全自动验证
+										</div>
+									{/if}
+								{/if}
 							{/if}
 						</div>
 					{/if}
@@ -443,6 +624,103 @@
 	}
 	.card-wrapper:hover .del-inline { opacity: 0.5; }
 	.del-inline:hover { opacity: 1 !important; background: #fee2e2; color: #ef4444; }
+
+	/* 删除动画 */
+	.card-wrapper.deleting {
+		opacity: 0.3; transform: scale(0.95); pointer-events: none;
+		transition: all 0.4s ease;
+	}
+
+	/* Pod 阶段徽章 */
+	.phase-badge {
+		font-size: 0.68rem; padding: 1px 8px; border-radius: 10px;
+		font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+	}
+	.phase-badge.phase-pending { background: #fff3e0; color: #e65100; }
+	.phase-badge.phase-containercreating { background: #e3f2fd; color: #1565c0; animation: pulse 1.5s infinite; }
+	.phase-badge.phase-terminating { background: #fce4ec; color: #c62828; }
+
+	/* K8s Events 时间线 */
+	.timeline {
+		margin-top: 0.8rem; border-top: 1px solid #e2e8f0; padding-top: 0.6rem;
+	}
+	.timeline-title {
+		font-size: 0.78rem; font-weight: 600; color: #475569; margin-bottom: 6px;
+	}
+	.timeline-item {
+		display: flex; align-items: baseline; gap: 8px; padding: 3px 0;
+		font-size: 0.72rem; position: relative; padding-left: 16px;
+	}
+	.timeline-item::before {
+		content: ''; position: absolute; left: 4px; top: 8px; bottom: -4px;
+		width: 1px; background: #e2e8f0;
+	}
+	.timeline-item:last-child::before { display: none; }
+	.tl-dot {
+		position: absolute; left: 0; top: 6px;
+		width: 8px; height: 8px; border-radius: 50%;
+	}
+	.tl-dot.normal { background: #4caf50; }
+	.tl-dot.warn { background: #f59e0b; }
+	.tl-time { color: #94a3b8; min-width: 56px; font-family: monospace; }
+	.tl-reason { color: #334155; font-weight: 600; min-width: 80px; }
+	.tl-msg { color: #64748b; flex: 1; }
+
+	/* 内存加密验证面板 */
+	.encrypt-panel {
+		margin-top: 0.8rem; border-top: 1px solid #e2e8f0; padding-top: 0.6rem;
+	}
+	.encrypt-header {
+		display: flex; justify-content: space-between; align-items: center;
+		font-size: 0.78rem; font-weight: 600; color: #475569; margin-bottom: 8px;
+		flex-wrap: wrap; gap: 6px;
+	}
+	.encrypt-btns {
+		display: flex; gap: 6px;
+	}
+	.encrypt-btns button {
+		padding: 5px 10px; border: 1px solid #e2e8f0; border-radius: 6px;
+		background: #fff; font-size: 0.7rem; font-weight: 500; cursor: pointer;
+		transition: all 0.15s;
+	}
+	.encrypt-btns button:hover:not(:disabled) { background: #f1f5f9; border-color: #cbd5e1; }
+	.encrypt-btns button:disabled { opacity: 0.5; cursor: not-allowed; }
+	.encrypt-plaintext {
+		font-size: 0.74rem; color: #64748b; margin-bottom: 6px;
+	}
+	.encrypt-plaintext code {
+		background: #e8f5e9; color: #2e7d32; padding: 2px 6px; border-radius: 4px;
+		font-size: 0.72rem; font-weight: 600;
+	}
+	.encrypt-compare {
+		display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+	}
+	@media (max-width: 700px) { .encrypt-compare { grid-template-columns: 1fr; } }
+	.encrypt-col {
+		border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px;
+	}
+	.host-col { border-left: 3px solid #ef4444; }
+	.guest-col { border-left: 3px solid #4caf50; }
+	.encrypt-col-title {
+		font-size: 0.72rem; font-weight: 600; color: #334155; margin-bottom: 2px;
+	}
+	.encrypt-col-sub {
+		font-size: 0.66rem; color: #94a3b8; margin-bottom: 6px;
+	}
+	.encrypt-summary {
+		font-size: 0.72rem; font-weight: 600; padding: 6px 8px; border-radius: 6px; margin-top: 4px;
+	}
+	.encrypt-summary.found { background: #fef3c7; color: #92400e; }
+	.encrypt-summary.not-found { background: #dcfce7; color: #166534; }
+	.encrypt-error { color: #ef4444; font-size: 0.74rem; }
+	.encrypt-hint { color: #f59e0b; font-size: 0.74rem; }
+	.encrypt-semi-hint {
+		margin-top: 8px; font-size: 0.7rem; color: #94a3b8;
+		background: #f8fafc; padding: 6px 10px; border-radius: 6px;
+	}
+	.encrypt-semi-hint code {
+		background: #e2e8f0; padding: 1px 4px; border-radius: 3px; font-size: 0.68rem;
+	}
 
 	.loading { text-align: center; padding: 2rem; color: #94a3b8; animation: pulse 1.5s infinite; }
 </style>

@@ -32,10 +32,18 @@ func SetupRouter() *gin.Engine {
 		api.GET("/pods/:namespace/:name/logs", GetPodLogs)
 		api.GET("/pods/info/:namespace/:name", GetPodSysInfo)
 		api.GET("/pods/:namespace/:name/yaml", GetPodYaml)
+		api.GET("/pods/:namespace/:name/events", GetPodEvents)
 		api.GET("/proc/:pid/mem", GetProcMem)
 		api.GET("/runtimes", GetRuntimes)
 		api.GET("/runtimes/:name", GetRuntimeDetail)
 		api.GET("/trustee", GetTrustee)
+
+		// 内存加密验证
+		demo := api.Group("/demo")
+		{
+			demo.GET("/memory-encrypt", GetMemoryEncryptProof) // 全自动
+			demo.GET("/memory-compare", GetMemoryCompare)      // 半自动
+		}
 	}
 
 	// WebSocket 实时状态推送

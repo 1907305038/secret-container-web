@@ -98,3 +98,39 @@ type QemuProcess struct {
 	PID   int `json:"pid"`
 	RSSKB int `json:"rss_kb"`
 }
+
+// PodEvent K8s Event（用于创建时间线）
+type PodEvent struct {
+	Type      string `json:"type"`   // Normal / Warning
+	Reason    string `json:"reason"` // Scheduled, Pulling, Started...
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+}
+
+// MemoryEncryptProof 内存加密验证结果
+type MemoryEncryptProof struct {
+	Pod       string          `json:"pod"`
+	QemuPID   int             `json:"qemu_pid"`
+	Plaintext string          `json:"plaintext"`
+	AutoMode  bool            `json:"auto_mode"`
+	HostView  MemoryRegionSet `json:"host_view"`
+	GuestView MemoryRegionSet `json:"guest_view"`
+}
+
+// MemoryRegionSet 一侧（宿主机或容器内）的内存读取结果
+type MemoryRegionSet struct {
+	Found   bool           `json:"found"` // 是否找到明文字符串
+	Regions []MemoryRegion `json:"regions"`
+	Entropy float64        `json:"entropy"` // 平均熵值
+	Note    string         `json:"note"`
+}
+
+// MemoryRegion 单个内存区域
+type MemoryRegion struct {
+	Name      string  `json:"name"`       // heap / anon / stack
+	Address   string  `json:"address"`    // 起始-结束地址
+	HexDump   string  `json:"hex_dump"`   // hex 字符串
+	ASCIISafe string  `json:"ascii_safe"` // 可打印 ASCII
+	Entropy   float64 `json:"entropy"`
+	Readable  bool    `json:"readable"`
+}

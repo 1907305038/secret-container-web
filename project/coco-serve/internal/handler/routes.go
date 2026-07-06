@@ -220,6 +220,22 @@ func GetRuntimeDetail(c *gin.Context) {
 	c.JSON(200, detail)
 }
 
+// GetPodEvents 返回 Pod 的 K8s Events（创建时间线）
+func GetPodEvents(c *gin.Context) {
+	ns := c.Param("namespace")
+	name := c.Param("name")
+	if h == nil || h.K8s == nil {
+		c.JSON(503, gin.H{"error": "K8s not available"})
+		return
+	}
+	events, err := h.K8s.GetPodEvents(ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"events": events})
+}
+
 // helpers
 func hostname() string {
 	n, err := os.Hostname()

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -147,6 +148,17 @@ func CreatePod(c *gin.Context) {
 		c.JSON(500, gin.H{"error": fmt.Sprintf("create pod: %v", err)})
 		return
 	}
+
+	// 广播 pod_created 事件
+	event, _ := json.Marshal(map[string]interface{}{
+		"type":      "pod_created",
+		"name":      created.Name,
+		"namespace": ns,
+		"runtime":   req.Runtime,
+		"image":     req.Image,
+	})
+	WsHub.Broadcast(event)
+
 	c.JSON(201, gin.H{"status": "created", "name": created.Name, "ip": created.Status.PodIP, "namespace": ns})
 }
 
@@ -161,6 +173,15 @@ func DeletePod(c *gin.Context) {
 		c.JSON(500, gin.H{"error": fmt.Sprintf("delete: %v", err)})
 		return
 	}
+
+	// 广播 pod_deleted 事件
+	event, _ := json.Marshal(map[string]interface{}{
+		"type":      "pod_deleted",
+		"name":      name,
+		"namespace": ns,
+	})
+	WsHub.Broadcast(event)
+
 	c.JSON(200, gin.H{"status": "deleted", "name": name})
 }
 
