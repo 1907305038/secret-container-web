@@ -626,23 +626,23 @@
 	}
 	.card:hover { border-color: #cbd5e1; box-shadow: 0 2px 8px rgba(0,0,0,0.04); transform: translateY(-1px); }
 	.card.tdx { border-left: 4px solid #4caf50; background: linear-gradient(90deg, #f6fdf6 0%, #fff 100%); }
-	.card-left { min-width: 65px; }
-	.badge { font-weight: 600; font-size: 0.8rem; padding: 2px 10px; border-radius: 6px; }
+	.card-left { min-width: 60px; }
+	.badge { font-weight: 600; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; }
 	.badge.tdx { background: #e8f5e9; color: #2e7d32; }
 	.badge.normal { background: #e3f2fd; color: #1565c0; }
-	.card-main { flex: 1; min-width: 0; }
-	.card-top { display: flex; gap: 6px; align-items: center; font-size: 0.85rem; }
-	.name { font-weight: 600; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
-	.ns { color: #94a3b8; font-size: 0.72rem; min-width: 60px; }
-	.status-dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+	.card-main { flex: 1; min-width: 0; padding-right: 8px; }
+	.card-top { display: flex; gap: 5px; align-items: center; font-size: 0.83rem; }
+	.name { font-weight: 600; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+	.ns { color: #94a3b8; font-size: 0.7rem; min-width: 50px; flex-shrink: 0; }
+	.status-dot { width: 5px; height: 5px; border-radius: 50%; background: #cbd5e1; flex-shrink: 0; }
 	.status-dot.running { background: #4caf50; animation: pulse 2s infinite; }
 	@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-	.status { color: #64748b; font-size: 0.78rem; }
+	.status { color: #64748b; font-size: 0.74rem; flex-shrink: 0; }
 	.card-sub { display: flex; gap: 6px; margin-top: 2px; }
 	.chip { font-size: 0.7rem; padding: 1px 6px; border-radius: 4px; background: #f1f5f9; color: #64748b; }
 	.chip.tdx-chip { background: #e8f5e9; color: #2e7d32; }
-	.card-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-	.act-btn { background: none; border: none; cursor: pointer; border-radius: 4px; opacity: 0; transition: all 0.15s; padding: 3px 5px; font-size: 0.8rem; }
+	.card-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-left: 6px; }
+	.act-btn { background: none; border: none; cursor: pointer; border-radius: 4px; opacity: 0; transition: all 0.15s; padding: 3px 4px; font-size: 0.82rem; line-height: 1; }
 	.card-wrapper:hover .act-btn { opacity: 0.5; }
 	.act-btn:hover { opacity: 1 !important; }
 	.write-btn:hover { background: #e8f5e9; }
