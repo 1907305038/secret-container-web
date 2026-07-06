@@ -3,12 +3,14 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sys/unix"
 )
 
 type HostProc struct {
@@ -261,39 +263,34 @@ func listGuestProcs(name, ns string) []GuestProc {
 	return procs
 }
 
-// GetProcMem 证明：尝试直接读取容器内进程在宿主机上的内存
+// GetProcMem 证明：使用 ptrace 读取宿主机进程内存，验证隔离性
 func GetProcMem(c *gin.Context) {
 	pid := c.Param("pid")
 	ns := c.Query("ns")
 	pod := c.Query("pod")
 
 	// 检测宿主机上是否存在此 PID
-	_, err := exec.Command("test", "-d", "/proc/"+pid).Output()
+	_, err := os.Stat("/proc/" + pid)
 	hostExists := err == nil
 
 	// 如果是 TDX 容器的 guest 进程（小 PID），尝试证明宿主机上看不到
 	pidInt, _ := strconv.Atoi(pid)
 	isGuestPid := pidInt < 100 && pod != "" && ns != ""
 
-	// 尝试读取 /proc/pid/mem（不用 ptrace，直接读）
-	memOut, memErr := exec.Command("dd", "if=/proc/"+pid+"/mem", "bs=64", "count=1", "2>/dev/null").Output()
-	memReadable := memErr == nil && len(memOut) > 0
-
 	// 查 cmdline 看是什么进程
-	cmdline, _ := exec.Command("cat", "/proc/"+pid+"/cmdline", "2>/dev/null").Output()
+	cmdline, _ := os.ReadFile("/proc/" + pid + "/cmdline")
 	cmdStr := strings.ReplaceAll(strings.TrimSpace(string(cmdline)), "\x00", " ")
 
 	if isGuestPid && hostExists {
-		// 宿主机上存在同名 PID 但不是容器进程
 		who := cmdStr
 		if who == "" {
 			who = "[内核线程]"
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"pid":      pid,
-			"note":     fmt.Sprintf("宿主机 PID %s 是「%s」，完全不是容器内的 nginx 进程", pid, who),
+			"note":     fmt.Sprintf("宿主机 PID %s 是「%s」，完全不是容器内的进程", pid, who),
 			"tag":      "qemu",
-			"evidence": fmt.Sprintf("证据: 容器内 kubectl exec 看到 nginx(PID=%s)，但宿主机 /proc/%s 是%s", pid, pid, who),
+			"evidence": fmt.Sprintf("容器内通过 kubectl exec 看到的进程(PID=%s)，宿主机 /proc/%s 是 %s", pid, pid, who),
 		})
 		return
 	}
@@ -303,35 +300,133 @@ func GetProcMem(c *gin.Context) {
 			"pid":      pid,
 			"note":     "宿主机上不存在此 PID — 容器进程在 TDX 加密 VM 内运行，宿主机无法看到",
 			"tag":      "qemu",
-			"evidence": fmt.Sprintf("访问 /proc/%s → 不存在", pid),
+			"evidence": fmt.Sprintf("访问 /proc/%s → 不存在（TDX 加密隔离）", pid),
 		})
 		return
 	}
 
-	// 普通宿主机进程
+	// 对普通宿主机进程，使用 ptrace 尝试读取内存
 	isQemu := strings.Contains(cmdStr, "qemu-system")
 	tag := "shim"
 	if isQemu {
 		tag = "qemu"
 	}
-	prefix := "✅ root 可直接访问此进程内存"
-	if memReadable {
-		prefix = fmt.Sprintf("✅ /proc/%s/mem 可读 (%d bytes)", pid, len(memOut))
-		if isQemu {
-			prefix = "⚠️ QEMU 自身内存可读，但这只是 QEMU 虚拟机进程，不是容器内进程"
+
+	// 尝试 ptrace attach + 读取内存
+	memData, ptraceErr := readWithPtrace(pidInt)
+
+	if ptraceErr == nil && len(memData) > 0 {
+		hexStr := fmt.Sprintf("%x", memData)
+		if len(hexStr) > 128 {
+			hexStr = hexStr[:128] + "..."
 		}
-	} else {
 		if isQemu {
-			prefix = "⚠️ QEMU 进程 /proc/pid/mem 需要 ptrace 才能读取，且读到的只是 QEMU 自身内存"
+			c.JSON(http.StatusOK, gin.H{
+				"pid":      pid,
+				"note":     fmt.Sprintf("✅ ptrace 读取成功 (%d bytes)，但这是 QEMU 虚拟机进程自身内存，非容器内进程", len(memData)),
+				"tag":      tag,
+				"evidence": fmt.Sprintf("ptrace 读取 /proc/%s/mem → hex: %s | cmdline: %s", pid, hexStr, cmdStr),
+			})
 		} else {
-			prefix = fmt.Sprintf("⚠️ /proc/%s 存在但 mem 需 ptrace 读取", pid)
+			c.JSON(http.StatusOK, gin.H{
+				"pid":      pid,
+				"note":     fmt.Sprintf("✅ ptrace 读取成功 (%d bytes) — 普通容器进程内存对宿主机可见", len(memData)),
+				"tag":      tag,
+				"evidence": fmt.Sprintf("ptrace 读取 /proc/%s/mem → hex: %s | cmdline: %s", pid, hexStr, cmdStr),
+			})
 		}
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"pid":      pid,
-		"note":     prefix,
-		"tag":      tag,
-		"evidence": fmt.Sprintf("cmdline: %s", cmdStr),
-	})
+	// ptrace 失败
+	errMsg := ""
+	if ptraceErr != nil {
+		errMsg = ptraceErr.Error()
+	}
+	if isQemu {
+		c.JSON(http.StatusOK, gin.H{
+			"pid":      pid,
+			"note":     "⚠️ QEMU 进程 ptrace 失败（可能被 seccomp 或权限限制），且读到的只是 QEMU 自身内存",
+			"tag":      tag,
+			"evidence": fmt.Sprintf("ptrace 失败: %s | cmdline: %s", errMsg, cmdStr),
+		})
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"pid":      pid,
+			"note":     fmt.Sprintf("⚠️ ptrace 读取失败: %s", errMsg),
+			"tag":      tag,
+			"evidence": fmt.Sprintf("cmdline: %s", cmdStr),
+		})
+	}
+}
+
+// readWithPtrace 使用 ptrace attach 后读取进程内存
+func readWithPtrace(pid int) ([]byte, error) {
+	// 先找可读的内存区域
+	mapsData, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return nil, fmt.Errorf("read maps: %w", err)
+	}
+	var startAddr int64
+	for _, line := range strings.Split(string(mapsData), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		if !strings.Contains(parts[1], "r") {
+			continue
+		}
+		addrParts := strings.SplitN(parts[0], "-", 2)
+		if len(addrParts) != 2 {
+			continue
+		}
+		s, _ := strconv.ParseInt(addrParts[0], 16, 64)
+		e, _ := strconv.ParseInt(addrParts[1], 16, 64)
+		if e-s >= 128 {
+			startAddr = s
+			break
+		}
+	}
+	if startAddr == 0 {
+		return nil, fmt.Errorf("no readable memory region found")
+	}
+
+	// Attach 到目标进程
+	if err := unix.PtraceAttach(pid); err != nil {
+		return nil, fmt.Errorf("ptrace attach: %w", err)
+	}
+	defer unix.PtraceDetach(pid)
+
+	// 等待进程停止
+	var status unix.WaitStatus
+	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
+		return nil, fmt.Errorf("wait4: %w", err)
+	}
+
+	// 超时保护
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(3 * time.Second)
+		select {
+		case <-done:
+		default:
+			unix.PtraceDetach(pid)
+		}
+	}()
+
+	// 从有效地址读取内存
+	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
+	if err != nil {
+		close(done)
+		return nil, fmt.Errorf("open mem: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, 128)
+	n, err := f.ReadAt(buf, startAddr)
+	close(done)
+	if err != nil && n == 0 {
+		return nil, fmt.Errorf("read mem at 0x%x: %w", startAddr, err)
+	}
+	return buf[:n], nil
 }
