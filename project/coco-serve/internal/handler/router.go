@@ -62,6 +62,7 @@ func SetupRouter() *gin.Engine {
 		{
 			demo.GET("/memory-encrypt", GetMemoryEncryptProof) // 全自动
 			demo.GET("/memory-compare", GetMemoryCompare)      // 半自动
+			demo.POST("/write-and-read", GetWriteAndRead)      // 写入+读取对比
 		}
 	}
 

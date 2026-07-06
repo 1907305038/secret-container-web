@@ -4,7 +4,7 @@
 	import { quintOut, cubicOut } from 'svelte/easing';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import type { PodInfo, WsEvent, PodEvent, MemoryEncryptProof } from '$lib/types';
+	import type { PodInfo, WsEvent, PodEvent, MemoryEncryptProof, WriteAndReadResult, MemoryRegion } from '$lib/types';
 	import HexDump from '$lib/components/HexDump.svelte';
 
 	let pods = $state<PodInfo[]>([]);
@@ -110,6 +110,26 @@
 	// 内存加密验证
 	let encryptProofs = $state<Record<string, MemoryEncryptProof>>({});
 	let proofLoading = $state<Record<string, boolean>>({});
+
+	// 写入数据 + 读取内存对比
+	let writeResults = $state<Record<string, WriteAndReadResult>>({});
+	let writeLoading = $state<Record<string, boolean>>({});
+
+	async function writeAndRead(ns: string, name: string) {
+		const key = `${ns}/${name}`;
+		writeLoading[key] = true;
+		writeLoading = { ...writeLoading };
+		const r = await fetch('/api/demo/write-and-read', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ pod: name, ns })
+		});
+		const d = await r.json();
+		writeResults[key] = d;
+		writeResults = { ...writeResults };
+		writeLoading[key] = false;
+		writeLoading = { ...writeLoading };
+	}
 
 	async function readMem(pid: number, ns?: string, pod?: string) {
 		const key = String(pid);
@@ -323,6 +343,7 @@
 					</div>
 				</div>
 				<div class="card-right">
+					<button class="write-btn" onclick={(e) => { e.stopPropagation(); writeAndRead(pod.namespace, pod.name); }} title="写入数据并读取内存">📝</button>
 					<button class="yaml-btn" onclick={(e) => { e.stopPropagation(); showYaml(pod.namespace, pod.name); }} title="查看 YAML">📋</button>
 					<span class="arrow {expanded[key]?'open':''}">▸</span>
 				</div>
@@ -493,6 +514,31 @@
 						</div>
 					{/if}
 				</div>
+
+				<!-- 写入数据+内存读取结果 -->
+				{#if writeResults[key]}
+					{@const wr = writeResults[key]}
+					<div class="write-result" in:fade={{ delay: 100 }}>
+						<div class="write-result-header">
+							📝 内存验证: <code>{wr.plaintext}</code>
+							<span class="write-badge {wr.plaintext_found ? 'found' : 'safe'}">
+								{wr.plaintext_found ? '⚠️ 宿主机可读' : '✅ 加密保护'}
+							</span>
+						</div>
+						<div class="write-note">{wr.note}</div>
+						{#if wr.memory_regions?.length}
+							<div class="write-regions">
+								<div class="write-regions-title">内存区域 (PID: {wr.host_pid} — {wr.process_name?.split(' ')[0] || 'unknown'})</div>
+								{#each wr.memory_regions.slice(0, 6) as region}
+									<div class="write-region">
+										<div class="wr-addr">{region.address}</div>
+										<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={wr.plaintext_found ? 'plain' : 'cipher'} />
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			{/if}
 			<button class="del-inline" onclick={(e) => { e.stopPropagation(); deletePod(pod.namespace,pod.name); }} title="删除">🗑️</button>
 		</div>
@@ -756,6 +802,49 @@
 	}
 	.encrypt-semi-hint code {
 		background: #e2e8f0; padding: 1px 4px; border-radius: 3px; font-size: 0.68rem;
+	}
+
+	/* 写入按钮 */
+	.write-btn {
+		background: none; border: none; font-size: 0.85rem; cursor: pointer;
+		padding: 2px 4px; border-radius: 4px; opacity: 0;
+		transition: all 0.15s;
+	}
+	.card-wrapper:hover .write-btn { opacity: 0.5; }
+	.write-btn:hover { opacity: 1 !important; background: #e8f5e9; }
+
+	/* 写入结果面板 */
+	.write-result {
+		margin-top: 4px; background: #f8fafc; border: 1px solid #e2e8f0;
+		border-radius: 8px; padding: 10px 12px;
+	}
+	.write-result-header {
+		font-size: 0.78rem; font-weight: 600; margin-bottom: 4px;
+		display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+	}
+	.write-result-header code {
+		background: #1e293b; color: #4ade80; padding: 2px 8px;
+		border-radius: 4px; font-size: 0.72rem;
+	}
+	.write-badge {
+		font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+	}
+	.write-badge.found { background: #fef3c7; color: #92400e; }
+	.write-badge.safe { background: #dcfce7; color: #166534; }
+	.write-note {
+		font-size: 0.74rem; color: #475569; margin-bottom: 6px;
+		padding: 4px 8px; background: #fff; border-radius: 4px;
+		border-left: 3px solid #3b82f6;
+	}
+	.write-regions { margin-top: 4px; }
+	.write-regions-title {
+		font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px;
+		font-family: monospace;
+	}
+	.write-region { margin-bottom: 3px; }
+	.wr-addr {
+		font-size: 0.65rem; color: #64748b; font-family: monospace;
+		margin-bottom: 2px;
 	}
 
 	.loading { text-align: center; padding: 2rem; color: #94a3b8; animation: pulse 1.5s infinite; }

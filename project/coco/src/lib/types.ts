@@ -79,3 +79,15 @@ export interface PodSysInfo {
 	host_procs: { pid: number; comm: string; rss_kb: number }[];
 	guest_procs: { pid: number; comm: string }[];
 }
+
+// 写入+读取结果
+export interface WriteAndReadResult {
+	pod: string;
+	plaintext: string;
+	is_tdx: boolean;
+	host_pid: number;
+	process_name: string;
+	memory_regions: MemoryRegion[];
+	plaintext_found: boolean;
+	note: string;
+}

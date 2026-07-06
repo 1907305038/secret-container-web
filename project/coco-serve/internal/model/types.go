@@ -134,3 +134,15 @@ type MemoryRegion struct {
 	Entropy   float64 `json:"entropy"`
 	Readable  bool    `json:"readable"`
 }
+
+// WriteAndReadResult 写入数据后读取内存的结果
+type WriteAndReadResult struct {
+	Pod            string         `json:"pod"`
+	Plaintext      string         `json:"plaintext"`
+	IsTDX          bool           `json:"is_tdx"`
+	HostPID        int            `json:"host_pid"`
+	ProcessName    string         `json:"process_name"` // 宿主机上的进程名
+	MemoryRegions  []MemoryRegion `json:"memory_regions"`
+	PlaintextFound bool           `json:"plaintext_found"` // 宿主机内存中是否找到明文
+	Note           string         `json:"note"`
+}

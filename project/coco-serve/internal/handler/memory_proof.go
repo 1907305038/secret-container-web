@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"golang.org/x/sys/unix"
 )
 
 // GetMemoryEncryptProof 全自动模式：写入测试数据 → 宿主机读取 → 容器内读取 → 对比
@@ -128,27 +129,28 @@ func execPodCmd(pod, ns, cmd string) (string, error) {
 
 // findQemuPID 找到指定 Pod 对应的 QEMU 进程 PID
 func findQemuPID(pod, ns string) (int, error) {
-	// 先获取 Pod UID
+	// 获取 Pod UID
 	uidOut, err := exec.Command("kubectl", "get", "pod", pod, "-n", ns,
 		"-o", "jsonpath={.metadata.uid}").Output()
 	podUID := strings.TrimSpace(string(uidOut))
 	if err != nil || podUID == "" {
-		// fallback: 按 Pod 名搜索
-		out, err := exec.Command("sh", "-c",
-			fmt.Sprintf("ps -eo pid,args --no-headers | grep qemu-system | grep '%s' | grep -v grep | head -1 | awk '{print $1}'", pod)).Output()
-		if err != nil {
-			return 0, fmt.Errorf("未找到 QEMU 进程")
-		}
-		return strconv.Atoi(strings.TrimSpace(string(out)))
+		return 0, fmt.Errorf("无法获取 Pod UID")
 	}
 
-	// 按 UID 精确搜索
-	out, err := exec.Command("sh", "-c",
-		fmt.Sprintf("ps -eo pid,args --no-headers | grep qemu-system | grep '%s' | grep -v grep | head -1 | awk '{print $1}'", podUID)).Output()
-	if err != nil {
-		return 0, fmt.Errorf("未找到匹配 Pod UID 的 QEMU 进程")
+	// 遍历 QEMU 进程，通过 /proc/PID/mountinfo 匹配 Pod UID
+	qemuOut, _ := exec.Command("sh", "-c",
+		"ps -eo pid,args --no-headers | grep qemu-system | grep -v grep | awk '{print $1}'").Output()
+	for _, line := range strings.Split(strings.TrimSpace(string(qemuOut)), "\n") {
+		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || pid == 0 {
+			continue
+		}
+		mountInfo, err := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
+		if err == nil && strings.Contains(string(mountInfo), podUID) {
+			return pid, nil
+		}
 	}
-	return strconv.Atoi(strings.TrimSpace(string(out)))
+	return 0, fmt.Errorf("未找到匹配 Pod UID 的 QEMU 进程")
 }
 
 // readHostMemoryView 读取宿主机侧的内存视图
@@ -371,4 +373,317 @@ func toASCIISafe(data []byte) string {
 		}
 	}
 	return sb.String()
+}
+
+// GetWriteAndRead 写入测试数据到容器，然后从宿主机读取内存进行对比
+// POST /api/demo/write-and-read  body: {"pod":"name","ns":"namespace"}
+func GetWriteAndRead(c *gin.Context) {
+	var req struct {
+		Pod string `json:"pod" binding:"required"`
+		Ns  string `json:"ns"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Ns == "" {
+		req.Ns = "default"
+	}
+
+	result := model.WriteAndReadResult{
+		Pod:       req.Ns + "/" + req.Pod,
+		Plaintext: fmt.Sprintf("SECRET_%d", time.Now().Unix()),
+	}
+
+	// 1. 写入测试数据到容器内 /dev/shm
+	writeCmd := fmt.Sprintf("echo '%s' > /dev/shm/proof.txt && cat /dev/shm/proof.txt", result.Plaintext)
+	out, err := execPodCmd(req.Pod, req.Ns, writeCmd)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": "无法写入: " + err.Error()})
+		return
+	}
+	result.Plaintext = strings.TrimSpace(out)
+
+	// 2. 判断是否 TDX，找对应的宿主机进程
+	isTdx := false
+	if h != nil && h.K8s != nil {
+		if pods, _ := h.K8s.GetPods(); pods != nil {
+			for _, p := range pods {
+				if p.Name == req.Pod && p.Namespace == req.Ns {
+					isTdx = strings.Contains(p.RuntimeClass, "tdx")
+					break
+				}
+			}
+		}
+	}
+	result.IsTDX = isTdx
+
+	if isTdx {
+		// TDX: 读 QEMU 进程内存 → 搜索明文 → 预期找不到（加密）
+		qemuPID, err := findQemuPID(req.Pod, req.Ns)
+		if err != nil {
+			result.Note = "未找到 QEMU 进程: " + err.Error()
+		} else {
+			result.HostPID = qemuPID
+			result.ProcessName = "qemu-system-x86_64"
+			result.MemoryRegions, result.PlaintextFound = scanProcessMemRegions(qemuPID, result.Plaintext)
+			if result.PlaintextFound {
+				result.Note = "⚠️ 在 QEMU 内存中找到了明文！可能不是 TDX 加密容器"
+			} else {
+				result.Note = fmt.Sprintf("✅ TDX 加密生效 — 宿主机扫描 QEMU 的 %d 个区域均未找到明文", len(result.MemoryRegions))
+			}
+		}
+	} else {
+		// 普通容器: 通过 /proc/PID/root 验证宿主机可直接访问容器文件
+		hostPID, procName := findContainerHostPID(req.Pod, req.Ns)
+		if hostPID == 0 {
+			result.Note = "未找到容器进程的宿主机 PID"
+		} else {
+			result.HostPID = hostPID
+			result.ProcessName = procName
+			// 宿主机通过 /proc/PID/root 读取容器内文件
+			hostPath := fmt.Sprintf("/proc/%d/root/dev/shm/proof.txt", hostPID)
+			dataFromHost, err := os.ReadFile(hostPath)
+			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
+				result.PlaintextFound = true
+				result.Note = fmt.Sprintf("⚠️ 宿主机可直接读取容器文件！PID=%d 路径=%s 明文=%s", hostPID, hostPath, strings.TrimSpace(string(dataFromHost)))
+			} else if err != nil {
+				result.Note = fmt.Sprintf("宿主机读取失败: %v (PID=%d)", err, hostPID)
+			} else {
+				result.Note = fmt.Sprintf("宿主机文件内容不匹配 (PID=%d)", hostPID)
+			}
+
+			// 同时读取进程内存区域（展示实际内存数据 + 地址）
+			result.MemoryRegions, _ = scanProcessMemRegions(hostPID, "")
+		}
+	}
+
+	logger.Memory.Info("write and read",
+		zap.String("pod", result.Pod),
+		zap.Bool("is_tdx", result.IsTDX),
+		zap.Int("host_pid", result.HostPID),
+		zap.Bool("found", result.PlaintextFound),
+	)
+
+	c.JSON(http.StatusOK, result)
+}
+
+// findContainerHostPID 找到普通容器进程在宿主机上的 PID（通过 Pod UID 匹配 cgroup）
+func findContainerHostPID(pod, ns string) (int, string) {
+	// 获取 Pod UID
+	uidOut, err := exec.Command("kubectl", "get", "pod", pod, "-n", ns,
+		"-o", "jsonpath={.metadata.uid}").Output()
+	podUID := strings.TrimSpace(string(uidOut))
+	if err != nil || podUID == "" {
+		return 0, ""
+	}
+
+	// 遍历所有 containerd-shim 的子进程，匹配 pod UID
+	shimOut, _ := exec.Command("sh", "-c",
+		"ps -eo pid,args --no-headers | grep containerd-shim | grep -v grep | awk '{print $1}'").Output()
+	for _, line := range strings.Split(strings.TrimSpace(string(shimOut)), "\n") {
+		shimPID, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || shimPID == 0 {
+			continue
+		}
+		childrenOut, _ := exec.Command("sh", "-c",
+			fmt.Sprintf("cat /proc/%d/task/*/children 2>/dev/null | tr ' ' '\\n' | sort -u", shimPID)).Output()
+		for _, childLine := range strings.Split(strings.TrimSpace(string(childrenOut)), "\n") {
+			childPID, err := strconv.Atoi(strings.TrimSpace(childLine))
+			if err != nil || childPID <= 1 {
+				continue
+			}
+			// 读 mountinfo 匹配 pod UID
+			mountInfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", childPID))
+			if !strings.Contains(string(mountInfo), podUID) {
+				continue
+			}
+			// 跳过 QEMU/内核进程
+			cmdline, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", childPID))
+			name := strings.ReplaceAll(string(cmdline), "\x00", " ")
+			if name == "" {
+				if comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", childPID)); len(comm) > 0 {
+					name = strings.TrimSpace(string(comm))
+				}
+			}
+			if strings.Contains(name, "qemu-system") || strings.Contains(name, "containerd-shim") {
+				continue
+			}
+			return childPID, name
+		}
+	}
+	return 0, ""
+}
+
+// scanProcessMemRegions 扫描进程 /proc/PID/maps 的所有可读区域，读取并搜索明文
+func scanProcessMemRegions(pid int, plaintext string) ([]model.MemoryRegion, bool) {
+	mapsData, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return nil, false
+	}
+
+	// Ptrace attach
+	if err := unix.PtraceAttach(pid); err != nil {
+		// 如果 ptrace 失败，尝试用 dd 直接读（部分内核允许）
+		return scanProcMemFallback(pid, plaintext)
+	}
+	defer unix.PtraceDetach(pid)
+
+	var status unix.WaitStatus
+	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
+		unix.PtraceDetach(pid)
+		return scanProcMemFallback(pid, plaintext)
+	}
+
+	// 超时保护
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(3 * time.Second)
+		select {
+		case <-done:
+		default:
+			unix.PtraceDetach(pid)
+		}
+	}()
+
+	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
+	if err != nil {
+		close(done)
+		return nil, false
+	}
+	defer f.Close()
+
+	found := false
+	var regions []model.MemoryRegion
+	count := 0
+
+	for _, line := range strings.Split(string(mapsData), "\n") {
+		if count >= 20 {
+			break
+		} // 最多读 20 个区域
+		parts := strings.Fields(line)
+		if len(parts) < 5 {
+			continue
+		}
+		perm := parts[1]
+		if !strings.Contains(perm, "r") {
+			continue
+		}
+		addrParts := strings.SplitN(parts[0], "-", 2)
+		if len(addrParts) != 2 {
+			continue
+		}
+		start, _ := strconv.ParseInt(addrParts[0], 16, 64)
+		end, _ := strconv.ParseInt(addrParts[1], 16, 64)
+
+		// 跳过过大或过小的区域
+		if end-start < 128 || end-start > 100*1024*1024 {
+			continue
+		}
+
+		readSize := 256
+		if int(end-start) < readSize {
+			readSize = int(end - start)
+		}
+
+		buf := make([]byte, readSize)
+		n, err := f.ReadAt(buf, start)
+		if err != nil && n == 0 {
+			continue
+		}
+		data := buf[:n]
+		count++
+
+		regionName := parts[len(parts)-1]
+		if regionName == "" || strings.HasPrefix(regionName, "[") {
+			regionName = fmt.Sprintf("anon-%d", count)
+		}
+
+		hexStr := hex.EncodeToString(data)
+		if len(hexStr) > 120 {
+			hexStr = hexStr[:120] + "..."
+		}
+
+		regions = append(regions, model.MemoryRegion{
+			Name:      regionName,
+			Address:   fmt.Sprintf("0x%x-0x%x", start, end),
+			HexDump:   hexStr,
+			ASCIISafe: toASCIISafe(data),
+			Entropy:   calcEntropy(data),
+			Readable:  true,
+		})
+
+		if strings.Contains(string(data), plaintext) {
+			found = true
+		}
+	}
+	close(done)
+	return regions, found
+}
+
+// scanProcMemFallback 不使用 ptrace 的回退方案
+func scanProcMemFallback(pid int, plaintext string) ([]model.MemoryRegion, bool) {
+	// 只读 /proc/PID/maps 中的可读区域，用 dd 尝试读取
+	mapsData, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return nil, false
+	}
+
+	found := false
+	var regions []model.MemoryRegion
+	count := 0
+
+	for _, line := range strings.Split(string(mapsData), "\n") {
+		if count >= 10 {
+			break
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 5 || !strings.Contains(parts[1], "r") {
+			continue
+		}
+		addrParts := strings.SplitN(parts[0], "-", 2)
+		if len(addrParts) != 2 {
+			continue
+		}
+		start, _ := strconv.ParseInt(addrParts[0], 16, 64)
+		end, _ := strconv.ParseInt(addrParts[1], 16, 64)
+		if end-start < 128 || end-start > 100*1024*1024 {
+			continue
+		}
+
+		size := 256
+		if int(end-start) < 256 {
+			size = int(end - start)
+		}
+
+		data, err := readProcMem(pid, start, size)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		count++
+
+		hexStr := hex.EncodeToString(data)
+		if len(hexStr) > 120 {
+			hexStr = hexStr[:120] + "..."
+		}
+
+		regionName := parts[len(parts)-1]
+		if regionName == "" || strings.HasPrefix(regionName, "[") {
+			regionName = fmt.Sprintf("anon-%d", count)
+		}
+
+		regions = append(regions, model.MemoryRegion{
+			Name:      regionName,
+			Address:   fmt.Sprintf("0x%x-0x%x", start, end),
+			HexDump:   hexStr,
+			ASCIISafe: toASCIISafe(data),
+			Entropy:   calcEntropy(data),
+			Readable:  len(data) > 0,
+		})
+
+		if strings.Contains(string(data), plaintext) {
+			found = true
+		}
+	}
+	return regions, found
 }
