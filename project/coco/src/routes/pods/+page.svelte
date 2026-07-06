@@ -343,8 +343,9 @@
 					</div>
 				</div>
 				<div class="card-right">
-					<button class="write-btn" onclick={(e) => { e.stopPropagation(); writeAndRead(pod.namespace, pod.name); }} title="写入数据并读取内存">📝</button>
-					<button class="yaml-btn" onclick={(e) => { e.stopPropagation(); showYaml(pod.namespace, pod.name); }} title="查看 YAML">📋</button>
+					<button class="act-btn write-btn" onclick={(e) => { e.stopPropagation(); writeAndRead(pod.namespace, pod.name); }} title="写入数据">📝</button>
+					<button class="act-btn yaml-btn" onclick={(e) => { e.stopPropagation(); showYaml(pod.namespace, pod.name); }} title="YAML">📋</button>
+					<button class="act-btn del-btn" onclick={(e) => { e.stopPropagation(); deletePod(pod.namespace,pod.name); }} title="删除">🗑️</button>
 					<span class="arrow {expanded[key]?'open':''}">▸</span>
 				</div>
 			</div>
@@ -540,7 +541,7 @@
 					</div>
 				{/if}
 			{/if}
-			<button class="del-inline" onclick={(e) => { e.stopPropagation(); deletePod(pod.namespace,pod.name); }} title="删除">🗑️</button>
+	
 		</div>
 	{/each}
 </div>
@@ -625,25 +626,28 @@
 	}
 	.card:hover { border-color: #cbd5e1; box-shadow: 0 2px 8px rgba(0,0,0,0.04); transform: translateY(-1px); }
 	.card.tdx { border-left: 4px solid #4caf50; background: linear-gradient(90deg, #f6fdf6 0%, #fff 100%); }
-	.card-left { min-width: 70px; }
+	.card-left { min-width: 65px; }
 	.badge { font-weight: 600; font-size: 0.8rem; padding: 2px 10px; border-radius: 6px; }
 	.badge.tdx { background: #e8f5e9; color: #2e7d32; }
 	.badge.normal { background: #e3f2fd; color: #1565c0; }
 	.card-main { flex: 1; min-width: 0; }
-	.card-top { display: flex; gap: 10px; align-items: center; font-size: 0.88rem; }
-	.name { font-weight: 600; color: #1e293b; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.ns { color: #94a3b8; font-size: 0.78rem; min-width: 80px; }
+	.card-top { display: flex; gap: 6px; align-items: center; font-size: 0.85rem; }
+	.name { font-weight: 600; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+	.ns { color: #94a3b8; font-size: 0.72rem; min-width: 60px; }
 	.status-dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
 	.status-dot.running { background: #4caf50; animation: pulse 2s infinite; }
 	@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 	.status { color: #64748b; font-size: 0.78rem; }
-	.card-sub { display: flex; gap: 8px; margin-top: 3px; }
-	.chip { font-size: 0.73rem; padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; }
+	.card-sub { display: flex; gap: 6px; margin-top: 2px; }
+	.chip { font-size: 0.7rem; padding: 1px 6px; border-radius: 4px; background: #f1f5f9; color: #64748b; }
 	.chip.tdx-chip { background: #e8f5e9; color: #2e7d32; }
-	.card-right { display: flex; align-items: center; gap: 4px; }
-	.yaml-btn { background: none; border: none; font-size: 0.9rem; cursor: pointer; padding: 2px 4px; border-radius: 4px; opacity: 0; transition: all 0.15s; }
-	.card-wrapper:hover .yaml-btn { opacity: 0.5; }
-	.yaml-btn:hover { opacity: 1 !important; background: #e8f5e9; }
+	.card-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+	.act-btn { background: none; border: none; cursor: pointer; border-radius: 4px; opacity: 0; transition: all 0.15s; padding: 3px 5px; font-size: 0.8rem; }
+	.card-wrapper:hover .act-btn { opacity: 0.5; }
+	.act-btn:hover { opacity: 1 !important; }
+	.write-btn:hover { background: #e8f5e9; }
+	.yaml-btn:hover { background: #e8f5e9; }
+	.del-btn:hover { background: #fee2e2; color: #ef4444; }
 	.arrow { color: #94a3b8; font-size: 0.9rem; display: inline-block; transition: transform 0.2s; }
 	.arrow.open { transform: rotate(90deg); }
 
@@ -699,13 +703,7 @@
 	.mem-note.shim { color: #4ade80; }
 	.evidence { font-size: 0.68rem; color: #94a3b8; font-family: monospace; line-height: 1.4; }
 
-	.del-inline {
-		position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-		padding: 4px 8px; border: none; background: none; font-size: 0.85rem;
-		cursor: pointer; opacity: 0; border-radius: 6px; transition: all 0.15s; z-index: 2;
-	}
-	.card-wrapper:hover .del-inline { opacity: 0.5; }
-	.del-inline:hover { opacity: 1 !important; background: #fee2e2; color: #ef4444; }
+
 
 	/* 删除动画 */
 	.card-wrapper.deleting {
@@ -805,13 +803,7 @@
 	}
 
 	/* 写入按钮 */
-	.write-btn {
-		background: none; border: none; font-size: 0.85rem; cursor: pointer;
-		padding: 2px 4px; border-radius: 4px; opacity: 0;
-		transition: all 0.15s;
-	}
-	.card-wrapper:hover .write-btn { opacity: 0.5; }
-	.write-btn:hover { opacity: 1 !important; background: #e8f5e9; }
+
 
 	/* 写入结果面板 */
 	.write-result {
