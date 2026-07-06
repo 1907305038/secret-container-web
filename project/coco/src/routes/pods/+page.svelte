@@ -349,7 +349,13 @@
 					{#if sysData[key].host_procs?.length || sysData[key].guest_procs?.length}
 						<div class="procs-box" in:fade={{ delay: 150 }}>
 							{#if sysData[key].host_procs?.length}
-								<div class="procs-title">🖥️ 宿主机可见进程 ({sysData[key].host_procs.length} 个)</div>
+								{#if sysData[key].is_tdx}
+									<div class="procs-title">🖥️ 宿主机可见 — QEMU 虚拟机壳 ({sysData[key].host_procs.length} 个)</div>
+									<div class="procs-hint">⚠️ 这只是 Kata 虚拟机的 QEMU 外壳进程，不是容器内的进程。宿主机无法看到容器内真实进程。</div>
+								{:else}
+									<div class="procs-title">🖥️ 宿主机可见进程 ({sysData[key].host_procs.length} 个)</div>
+									<div class="procs-hint normal">普通容器共享宿主机内核，宿主机可直接看到容器对应的 containerd-shim 进程。</div>
+								{/if}
 								{#each sysData[key].host_procs as proc}
 									<div class="proc-line" onclick={(e) => { e.stopPropagation(); readMem(proc.pid); }} role="button" tabindex="0">
 										<code>PID {proc.pid}</code>
@@ -617,6 +623,14 @@
 
 	.procs-box { margin-top: 0.8rem; border-top: 1px solid #e2e8f0; padding-top: 0.6rem; }
 	.procs-title { font-size: 0.78rem; color: #475569; margin-bottom: 4px; font-weight: 600; }
+	.procs-hint {
+		font-size: 0.68rem; color: #b45309; background: #fffbeb; padding: 4px 10px;
+		border-radius: 6px; margin-bottom: 6px; line-height: 1.4;
+		border-left: 3px solid #f59e0b;
+	}
+	.procs-hint.normal {
+		color: #64748b; background: #f8fafc; border-left-color: #94a3b8;
+	}
 	.guest-title { margin-top: 8px; }
 	.hidden-badge { display: inline-block; background: #ff9800; color: #fff; font-size: 0.62rem; padding: 1px 7px; border-radius: 10px; margin-left: 6px; font-weight: 500; text-transform: uppercase; }
 	.proc-line {
