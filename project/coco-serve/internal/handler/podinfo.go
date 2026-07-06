@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"coco-serve/internal/logger"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 )
 
@@ -341,6 +343,13 @@ func GetProcMem(c *gin.Context) {
 		evidenceParts = append(evidenceParts, fmt.Sprintf("[%s %s] %s", r.regionName, r.regionAddr, hexStr))
 	}
 	evidenceStr := strings.Join(evidenceParts, "\n")
+
+	logger.Memory.Info("ptrace read",
+		zap.String("pid", pid),
+		zap.Int("regions", len(results)),
+		zap.Int("bytes", totalBytes(results)),
+		zap.Bool("is_qemu", isQemu),
+	)
 
 	if isQemu {
 		c.JSON(http.StatusOK, gin.H{

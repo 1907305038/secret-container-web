@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
-	"log"
 	"time"
 
 	"coco-serve/internal/collector"
+	"coco-serve/internal/logger"
+
+	"go.uber.org/zap"
 )
 
 // StartWatcher 启动后台监控，每隔 interval 秒采集状态并广播
@@ -43,7 +45,7 @@ func StartWatcher(interval time.Duration) {
 							"message": "pod 状态已更新",
 						})
 						WsHub.Broadcast(data)
-						log.Printf("[watcher] pod count changed: %d", current)
+						logger.Pod.Info("pod count changed", zap.Int("count", current))
 					}
 
 					// 单 Pod 状态追踪
@@ -59,6 +61,13 @@ func StartWatcher(interval time.Duration) {
 								"phase":     p.Status,
 							})
 							WsHub.Broadcast(data)
+							if exists {
+								logger.Pod.Info("pod phase changed",
+									zap.String("name", p.Name),
+									zap.String("from", prev),
+									zap.String("to", p.Status),
+								)
+							}
 						}
 					}
 				}
@@ -66,5 +75,5 @@ func StartWatcher(interval time.Duration) {
 		}
 	}()
 
-	log.Printf("[watcher] started, interval=%v", interval)
+	logger.System.Info("watcher started", zap.Duration("interval", interval))
 }

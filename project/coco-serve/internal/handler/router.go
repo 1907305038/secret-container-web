@@ -1,15 +1,34 @@
 package handler
 
 import (
+	"coco-serve/internal/logger"
 	"coco-serve/internal/ws"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 var WsHub = ws.NewHub()
 
 func SetupRouter() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+
+	// 访问日志中间件
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		logger.Access.Info("",
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.URL.Path),
+			zap.Int("status", c.Writer.Status()),
+			zap.Duration("latency", time.Since(start)),
+			zap.String("ip", c.ClientIP()),
+		)
+	})
+
+	// 恢复中间件（替代 gin.Default 的 Recovery）
+	r.Use(gin.Recovery())
 
 	// CORS 中间件
 	r.Use(func(c *gin.Context) {

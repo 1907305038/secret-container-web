@@ -1,13 +1,14 @@
 package handler
 
 import (
+	"coco-serve/internal/logger"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -144,7 +145,7 @@ func CreatePod(c *gin.Context) {
 
 	created, err := h.K8s.CreatePod(pod)
 	if err != nil {
-		log.Printf("create pod: %v", err)
+		logger.Pod.Error("create pod failed", zap.String("name", req.Name), zap.Error(err))
 		c.JSON(500, gin.H{"error": fmt.Sprintf("create pod: %v", err)})
 		return
 	}
@@ -159,6 +160,13 @@ func CreatePod(c *gin.Context) {
 	})
 	WsHub.Broadcast(event)
 
+	logger.Pod.Info("pod created",
+		zap.String("name", created.Name),
+		zap.String("namespace", ns),
+		zap.String("runtime", req.Runtime),
+		zap.String("image", req.Image),
+	)
+
 	c.JSON(201, gin.H{"status": "created", "name": created.Name, "ip": created.Status.PodIP, "namespace": ns})
 }
 
@@ -169,7 +177,7 @@ func DeletePod(c *gin.Context) {
 	}
 	ns, name := c.Param("namespace"), c.Param("name")
 	if err := h.K8s.DeletePod(ns, name); err != nil {
-		log.Printf("delete pod: %v", err)
+		logger.Pod.Error("delete pod failed", zap.String("name", name), zap.String("namespace", ns), zap.Error(err))
 		c.JSON(500, gin.H{"error": fmt.Sprintf("delete: %v", err)})
 		return
 	}
@@ -181,6 +189,8 @@ func DeletePod(c *gin.Context) {
 		"namespace": ns,
 	})
 	WsHub.Broadcast(event)
+
+	logger.Pod.Info("pod deleted", zap.String("name", name), zap.String("namespace", ns))
 
 	c.JSON(200, gin.H{"status": "deleted", "name": name})
 }
@@ -198,7 +208,7 @@ func GetPodLogs(c *gin.Context) {
 	}
 	logs, err := h.K8s.GetPodLogs(ns, name, tail)
 	if err != nil {
-		log.Printf("get logs: %v", err)
+		logger.Pod.Error("get pod logs failed", zap.String("name", name), zap.Error(err))
 		c.JSON(500, gin.H{"error": fmt.Sprintf("logs: %v", err)})
 		return
 	}

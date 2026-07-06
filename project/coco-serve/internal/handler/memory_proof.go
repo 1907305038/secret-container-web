@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"coco-serve/internal/logger"
 	"coco-serve/internal/model"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // GetMemoryEncryptProof 全自动模式：写入测试数据 → 宿主机读取 → 容器内读取 → 对比
@@ -57,6 +59,13 @@ func GetMemoryEncryptProof(c *gin.Context) {
 
 	// 4. 容器内视角
 	proof.GuestView = readGuestMemoryView(pod, ns, proof.Plaintext)
+
+	logger.Memory.Info("auto proof completed",
+		zap.String("pod", proof.Pod),
+		zap.Int("qemu_pid", proof.QemuPID),
+		zap.Bool("host_found", proof.HostView.Found),
+		zap.Float64("host_entropy", proof.HostView.Entropy),
+	)
 
 	c.JSON(http.StatusOK, proof)
 }

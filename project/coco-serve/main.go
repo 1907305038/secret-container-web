@@ -9,17 +9,23 @@ import (
 
 	"coco-serve/internal/handler"
 	"coco-serve/internal/k8sclient"
+	"coco-serve/internal/logger"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 //go:embed dist/*
 var frontend embed.FS
 
 func main() {
+	// 初始化日志系统
+	logger.Init("/var/log/coco-serve")
+	defer logger.Sync()
+
 	kc, err := k8sclient.New()
 	if err != nil {
-		log.Printf("WARNING: K8s client init failed: %v (API will use system data only)", err)
+		logger.System.Warn("K8s client init failed, using system data only", zap.Error(err))
 	}
 	handler.Init(kc)
 
@@ -31,7 +37,7 @@ func main() {
 	// 嵌入前端静态文件
 	distFS, err := fs.Sub(frontend, "dist")
 	if err != nil {
-		log.Fatal(err)
+		logger.System.Fatal("frontend embed failed", zap.Error(err))
 	}
 	// SPA 模式: 非 API 路由全部返回 index.html
 	r.NoRoute(func(c *gin.Context) {
