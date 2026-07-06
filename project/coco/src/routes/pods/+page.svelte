@@ -49,11 +49,11 @@
 			try {
 				const evt: WsEvent = JSON.parse(e.data);
 				if (evt.type === 'pod_created') {
-					msg = `✅ ${evt.name} 已创建，等待启动...`;
+					msg = `✅ ${String(evt.name || '')} 已创建，等待启动...`;
 					setTimeout(load, 2000);
 				}
 				if (evt.type === 'pod_deleted') {
-					msg = `🗑️ ${evt.name} 已删除`;
+					msg = `🗑️ ${String(evt.name || '')} 已删除`;
 					const key = (evt.namespace || 'default') + '/' + (evt.name || '');
 					deletingPods.add(key);
 					deletingPods = new Set(deletingPods);
@@ -175,14 +175,26 @@
 
 	async function createPod() {
 		msg = '创建中...';
-		const res = await fetch('/api/pods/create', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(buildForm()) });
-		const r = await res.json();
-		msg = res.ok ? `✅ ${r.name} 已创建` : `❌ ${r.error}`;
-		if (res.ok) { showForm = false; setTimeout(load, 3000); }
+		try {
+			const res = await fetch('/api/pods/create', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(buildForm()) });
+			const r = await res.json();
+			const name = String(r.name || '');
+			const err = String(r.error || '');
+			msg = res.ok ? `✅ ${name} 已创建` : `❌ ${err}`;
+			if (res.ok) { showForm = false; setTimeout(load, 3000); }
+		} catch (e) {
+			msg = `❌ 创建失败: ${String(e)}`;
+		}
 	}
 	async function deletePod(ns: string, name: string) {
-		msg = `删除 ${name}...`; await fetch(`/api/pods/${ns}/${name}`, { method: 'DELETE' });
-		msg = `✅ ${name} 已删除`; setTimeout(load, 2000);
+		msg = `删除 ${String(name)}...`;
+		try {
+			await fetch(`/api/pods/${ns}/${name}`, { method: 'DELETE' });
+			msg = `✅ ${String(name)} 已删除`;
+		} catch (e) {
+			msg = `❌ 删除失败: ${String(e)}`;
+		}
+		setTimeout(load, 2000);
 	}
 	function quickTdx() {
 		form = { name: 'tdx-' + Date.now().toString(36), namespace: 'default', image: 'docker.m.daocloud.io/library/nginx:alpine', runtime: 'kata-qemu-tdx', command: 'sleep 3600', args: '', cpu_req: '100m', mem_req: '128Mi', cpu_lim: '500m', mem_lim: '256Mi', labels: '', port: '80' };
