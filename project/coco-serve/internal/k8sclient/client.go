@@ -122,6 +122,18 @@ func (c *Client) DeletePod(namespace, name string) error {
 	return c.cs.CoreV1().Pods(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
 
+// GetPodStartTime 获取 Pod 的启动时间，用于计算运行时长
+func (c *Client) GetPodStartTime(namespace, name string) (metav1.Time, error) {
+	pod, err := c.cs.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return metav1.Time{}, fmt.Errorf("get pod: %w", err)
+	}
+	if pod.Status.StartTime == nil {
+		return metav1.Time{}, fmt.Errorf("pod not started")
+	}
+	return *pod.Status.StartTime, nil
+}
+
 // GetPodLogs 获取 Pod 日志
 func (c *Client) GetPodLogs(namespace, name string, tailLines int64) (string, error) {
 	req := c.cs.CoreV1().Pods(namespace).GetLogs(name, &corev1.PodLogOptions{TailLines: &tailLines})

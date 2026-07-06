@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -76,15 +77,21 @@ func GetPodSysInfo(c *gin.Context) {
 		info.Info["CPU/内存"] = strings.Join(lines, "\n")
 	}
 
-	// 运行时间
-	if v, err := execPod("cat /proc/uptime"); err == nil {
-		f := strings.Fields(v)
-		if len(f) >= 1 {
-			sec, _ := strconv.ParseFloat(f[0], 64)
-			d := int(sec / 86400)
-			h := int(sec/3600) % 24
-			m := int(sec/60) % 60
-			info.Info["运行时间"] = fmt.Sprintf("%dd %dh %dm", d, h, m)
+	// 运行时间：从 K8s Pod startTime 计算（不再用 /proc/uptime，因为 runc 容器共享宿主机内核）
+	if h != nil && h.K8s != nil {
+		if t, err := h.K8s.GetPodStartTime(ns, name); err == nil {
+			dur := time.Since(t.Time)
+			d := int(dur.Hours() / 24)
+			hr := int(dur.Hours()) % 24
+			m := int(dur.Minutes()) % 60
+			s := int(dur.Seconds()) % 60
+			if d > 0 {
+				info.Info["运行时间"] = fmt.Sprintf("%dd %dh %dm", d, hr, m)
+			} else if hr > 0 {
+				info.Info["运行时间"] = fmt.Sprintf("%dh %dm %ds", hr, m, s)
+			} else {
+				info.Info["运行时间"] = fmt.Sprintf("%dm %ds", m, s)
+			}
 		}
 	}
 
