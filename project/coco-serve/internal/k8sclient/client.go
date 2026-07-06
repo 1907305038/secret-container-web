@@ -134,6 +134,40 @@ func (c *Client) GetPodStartTime(namespace, name string) (metav1.Time, error) {
 	return *pod.Status.StartTime, nil
 }
 
+// PodResources Pod 容器的资源请求和限制
+type PodResources struct {
+	CPUReq   string `json:"cpu_req"`
+	CPULimit string `json:"cpu_limit"`
+	MemReq   string `json:"mem_req"`
+	MemLimit string `json:"mem_limit"`
+}
+
+// GetPodResources 获取 Pod 第一个容器的资源请求和限制
+func (c *Client) GetPodResources(namespace, name string) (*PodResources, error) {
+	pod, err := c.cs.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get pod: %w", err)
+	}
+	if len(pod.Spec.Containers) == 0 {
+		return nil, fmt.Errorf("no containers")
+	}
+	r := &PodResources{}
+	rr := pod.Spec.Containers[0].Resources
+	if cpu, ok := rr.Requests[corev1.ResourceCPU]; ok {
+		r.CPUReq = cpu.String()
+	}
+	if cpu, ok := rr.Limits[corev1.ResourceCPU]; ok {
+		r.CPULimit = cpu.String()
+	}
+	if mem, ok := rr.Requests[corev1.ResourceMemory]; ok {
+		r.MemReq = mem.String()
+	}
+	if mem, ok := rr.Limits[corev1.ResourceMemory]; ok {
+		r.MemLimit = mem.String()
+	}
+	return r, nil
+}
+
 // GetPodLogs 获取 Pod 日志
 func (c *Client) GetPodLogs(namespace, name string, tailLines int64) (string, error) {
 	req := c.cs.CoreV1().Pods(namespace).GetLogs(name, &corev1.PodLogOptions{TailLines: &tailLines})

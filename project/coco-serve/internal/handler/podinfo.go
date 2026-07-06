@@ -61,20 +61,71 @@ func GetPodSysInfo(c *gin.Context) {
 	// 判断是否 TDX: Guest 内核 6.18.x
 	info.IsTDX = strings.HasPrefix(guestKernel, "6.18.")
 
-	// 内存 + CPU
-	if v, err := execPod("grep -E '^(MemTotal|MemFree|MemAvailable)' /proc/meminfo"); err == nil {
-		var lines []string
-		for _, line := range strings.Split(v, "\n") {
-			f := strings.Fields(line)
-			if len(f) >= 2 {
-				kb, _ := strconv.ParseFloat(f[1], 64)
-				lines = append(lines, fmt.Sprintf("%s %s", f[0][:len(f[0])-1], sizeStr(kb*1024)))
+	// 容器资源（从 cgroup 读取实际使用量 + K8s 显示分配量）
+	var resLines []string
+
+	// 从 cgroup 读取容器实际内存使用
+	if v, err := execPod("cat /sys/fs/cgroup/memory.current 2>/dev/null"); err == nil && v != "" {
+		if b, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			resLines = append(resLines, "内存使用: "+sizeStr(b))
+		}
+	} else if v, err := execPod("cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null"); err == nil && v != "" {
+		if b, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			resLines = append(resLines, "内存使用: "+sizeStr(b))
+		}
+	}
+
+	// 从 cgroup 读取内存限制
+	if v, err := execPod("cat /sys/fs/cgroup/memory.max 2>/dev/null"); err == nil && v != "" && v != "max" {
+		if b, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			resLines = append(resLines, "内存限制: "+sizeStr(b))
+		}
+	} else if v, err := execPod("cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null"); err == nil && v != "" {
+		if b, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			if b > 1<<40 { // 超过 1TB 说明是无限制
+				resLines = append(resLines, "内存限制: 无限制")
+			} else {
+				resLines = append(resLines, "内存限制: "+sizeStr(b))
 			}
 		}
-		if load, err := execPod("cat /proc/loadavg"); err == nil {
-			lines = append(lines, "load: "+strings.Fields(load)[0])
+	}
+
+	// 从 K8s 获取 Pod 资源规格（requests/limits）
+	if h != nil && h.K8s != nil {
+		if res, err := h.K8s.GetPodResources(ns, name); err == nil {
+			specs := []string{}
+			if res.CPUReq != "" || res.CPULimit != "" {
+				cpu := ""
+				if res.CPUReq != "" {
+					cpu += res.CPUReq
+				}
+				if res.CPULimit != "" && res.CPULimit != res.CPUReq {
+					cpu += "/" + res.CPULimit
+				}
+				if cpu != "" {
+					specs = append(specs, "CPU: "+cpu)
+				}
+			}
+			if res.MemReq != "" || res.MemLimit != "" {
+				mem := ""
+				if res.MemReq != "" {
+					mem += res.MemReq
+				}
+				if res.MemLimit != "" && res.MemLimit != res.MemReq {
+					mem += "/" + res.MemLimit
+				}
+				if mem != "" {
+					specs = append(specs, "内存: 请求/限制 "+mem)
+				}
+			}
+			if len(specs) > 0 {
+				resLines = append(resLines, "资源规格: "+strings.Join(specs, " | "))
+			}
 		}
-		info.Info["CPU/内存"] = strings.Join(lines, "\n")
+	}
+
+	if len(resLines) > 0 {
+		info.Info["CPU/内存"] = strings.Join(resLines, "\n")
 	}
 
 	// 运行时间：从 K8s Pod startTime 计算（不再用 /proc/uptime，因为 runc 容器共享宿主机内核）
