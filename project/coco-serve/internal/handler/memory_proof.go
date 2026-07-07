@@ -413,6 +413,7 @@ func GetWriteAndRead(c *gin.Context) {
 		return
 	}
 	result.Plaintext = strings.TrimSpace(out)
+	result.FileName = fileName
 
 	// 列出所有已写入的文件
 	if allFiles, err := execPodCmd(req.Pod, req.Ns, "ls /dev/shm/proof_*.txt 2>/dev/null | wc -l"); err == nil {
@@ -515,6 +516,7 @@ func ReadMemOnly(c *gin.Context) {
 	}
 	if guestData, err := execPodCmd(req.Pod, req.Ns, "cat "+strings.TrimSpace(latestFile)); err == nil && guestData != "" {
 		result.Plaintext = strings.TrimSpace(guestData)
+		result.FileName = strings.TrimSpace(latestFile)
 		result.GuestConfirmed = true
 		if allFiles, err := execPodCmd(req.Pod, req.Ns, "ls /dev/shm/proof_*.txt 2>/dev/null | wc -l"); err == nil {
 			result.AllWrites, _ = strconv.Atoi(strings.TrimSpace(allFiles))

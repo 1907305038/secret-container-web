@@ -162,13 +162,16 @@
 	function openMemModal(podKey: string, idx: number) { memModal = { podKey, idx }; }
 	function closeMemModal() { memModal = null; }
 
-	// 删除某条写入数据
-	async function deleteProof(ns: string, name: string, idx: number) {
+	// 删除某条写入数据（用文件名定位）
+	async function deleteProof(ns: string, name: string, fileName: string, idx: number) {
 		const key = `${ns}/${name}`;
+		// 从文件名提取编号: /dev/shm/proof_3.txt → 3
+		const match = fileName.match(/proof_(\d+)\.txt/);
+		const num = match ? parseInt(match[1]) : 1;
 		await fetch('/api/demo/delete-proof', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ pod: name, ns, idx: idx + 1 }) // idx+1 = proof_N 的 N
+			body: JSON.stringify({ pod: name, ns, idx: num })
 		});
 		const arr = (writeResults[key] || []).filter((_, i) => i !== idx);
 		writeResults[key] = arr;
@@ -433,7 +436,7 @@
 										{#if wr.memory_regions?.length}
 											<button class="wr-act view" onclick={(e) => { e.stopPropagation(); openMemModal(key, idx); }}>📄 查看内存</button>
 										{/if}
-										<button class="wr-act del" onclick={(e) => { e.stopPropagation(); deleteProof(pod.namespace, pod.name, idx); }}>🗑️</button>
+										<button class="wr-act del" onclick={(e) => { e.stopPropagation(); deleteProof(pod.namespace, pod.name, wr.file_name || '', idx); }}>🗑️</button>
 									</div>
 								</div>
 								<div class="write-note">{wr.note}</div>
