@@ -399,8 +399,14 @@ func GetWriteAndRead(c *gin.Context) {
 		result.Plaintext = fmt.Sprintf("SECRET_%d", time.Now().Unix())
 	}
 
-	// 1. 写入测试数据到容器内 /dev/shm
-	writeCmd := fmt.Sprintf("echo '%s' > /dev/shm/proof.txt && cat /dev/shm/proof.txt", result.Plaintext)
+	// 1. 写入测试数据到容器内 /dev/shm，每次用不同文件名避免覆盖
+	counter := 1
+	if cntStr, err := execPodCmd(req.Pod, req.Ns, "cat /dev/shm/.proof_count 2>/dev/null"); err == nil {
+		fmt.Sscanf(strings.TrimSpace(cntStr), "%d", &counter)
+	}
+	fileName := fmt.Sprintf("/dev/shm/proof_%d.txt", counter)
+	writeCmd := fmt.Sprintf("echo '%s' > %s && echo '%d' > /dev/shm/.proof_count && cat %s",
+		result.Plaintext, fileName, counter+1, fileName)
 	out, err := execPodCmd(req.Pod, req.Ns, writeCmd)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": "无法写入: " + err.Error()})
@@ -408,8 +414,13 @@ func GetWriteAndRead(c *gin.Context) {
 	}
 	result.Plaintext = strings.TrimSpace(out)
 
+	// 列出所有已写入的文件
+	if allFiles, err := execPodCmd(req.Pod, req.Ns, "ls /dev/shm/proof_*.txt 2>/dev/null | wc -l"); err == nil {
+		result.AllWrites, _ = strconv.Atoi(strings.TrimSpace(allFiles))
+	}
+
 	// 3. 容器内确认：数据确实存在
-	if guestOut, err := execPodCmd(req.Pod, req.Ns, "cat /dev/shm/proof.txt"); err == nil {
+	if guestOut, err := execPodCmd(req.Pod, req.Ns, "cat "+fileName+" 2>/dev/null"); err == nil {
 		result.GuestConfirmed = strings.TrimSpace(guestOut) == result.Plaintext
 	}
 
@@ -451,7 +462,7 @@ func GetWriteAndRead(c *gin.Context) {
 			result.HostPID = hostPID
 			result.ProcessName = procName
 			// 宿主机通过 /proc/PID/root 读取容器内文件
-			hostPath := fmt.Sprintf("/proc/%d/root/dev/shm/proof.txt", hostPID)
+			hostPath := fmt.Sprintf("/proc/%d/root%s", hostPID, fileName)
 			dataFromHost, err := os.ReadFile(hostPath)
 			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
 				result.PlaintextFound = true
@@ -494,10 +505,24 @@ func ReadMemOnly(c *gin.Context) {
 
 	result := model.WriteAndReadResult{Pod: req.Ns + "/" + req.Pod}
 
-	// 从容器内读取已有数据
-	if guestData, err := execPodCmd(req.Pod, req.Ns, "cat /dev/shm/proof.txt 2>/dev/null"); err == nil && guestData != "" {
+	// 从容器内读取最新写入的数据
+	latestCmd := "cat /dev/shm/.proof_count 2>/dev/null"
+	cntStr, _ := execPodCmd(req.Pod, req.Ns, latestCmd)
+	cnt := 1
+	if cntStr != "" {
+		fmt.Sscanf(strings.TrimSpace(cntStr), "%d", &cnt)
+	}
+	// 读最新文件 (cnt-1)
+	latestFile := fmt.Sprintf("/dev/shm/proof_%d.txt", cnt-1)
+	if cnt <= 1 {
+		latestFile = "/dev/shm/proof_1.txt"
+	}
+	if guestData, err := execPodCmd(req.Pod, req.Ns, "cat "+latestFile+" 2>/dev/null"); err == nil && guestData != "" {
 		result.Plaintext = strings.TrimSpace(guestData)
 		result.GuestConfirmed = true
+		if allFiles, err := execPodCmd(req.Pod, req.Ns, "ls /dev/shm/proof_*.txt 2>/dev/null | wc -l"); err == nil {
+			result.AllWrites, _ = strconv.Atoi(strings.TrimSpace(allFiles))
+		}
 	} else {
 		result.Note = "容器内无数据，请先写入"
 		c.JSON(http.StatusOK, result)
@@ -539,7 +564,7 @@ func ReadMemOnly(c *gin.Context) {
 		} else {
 			result.HostPID = hostPID
 			result.ProcessName = procName
-			hostPath := fmt.Sprintf("/proc/%d/root/dev/shm/proof.txt", hostPID)
+			hostPath := fmt.Sprintf("/proc/%d/root%s", hostPID, latestFile)
 			dataFromHost, err := os.ReadFile(hostPath)
 			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
 				result.PlaintextFound = true

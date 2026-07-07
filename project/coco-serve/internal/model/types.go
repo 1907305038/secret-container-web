@@ -145,5 +145,6 @@ type WriteAndReadResult struct {
 	MemoryRegions  []MemoryRegion `json:"memory_regions"`
 	PlaintextFound bool           `json:"plaintext_found"` // 宿主机内存中是否找到明文
 	GuestConfirmed bool           `json:"guest_confirmed"` // 容器内确认数据存在
+	AllWrites      int            `json:"all_writes"`      // 已写入的文件总数
 	Note           string         `json:"note"`
 }
