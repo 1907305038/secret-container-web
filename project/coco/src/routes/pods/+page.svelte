@@ -450,7 +450,7 @@
 										{wr.plaintext_found ? '⚠️ 宿主机可读' : '✅ 加密保护'}
 									</span>
 									<div class="write-row-actions">
-										{#if wr.memory_regions?.length}
+										{#if wr.memory_regions?.length || wr.plaintext}
 											<button class="wr-act view" onclick={(e) => { e.stopPropagation(); openMemModal(key, idx); }}>📄 查看内存</button>
 										{/if}
 										<button class="wr-act del" onclick={(e) => { e.stopPropagation(); deleteProof(pod.namespace, pod.name, wr.file_name || '', idx); }}>🗑️</button>
