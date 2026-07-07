@@ -1,7 +1,7 @@
 # CoCo Panel — 机密容器可视化面板
 
-> **版本**: 1.1 | **日期**: 2026-07-06 | **语言**: Go + Svelte 5
-> **一句话**: 单二进制 K8s 可视化面板，展示 Intel TDX 机密容器内存加密与隔离证明
+> **版本**: 1.2 | **日期**: 2026-07-07 | **语言**: Go + Svelte 5
+> **一句话**: 单二进制 K8s 可视化面板，演示 Intel TDX 机密容器 MKTME 内存加密与隔离证明
 
 ---
 
@@ -18,19 +18,20 @@
 - Pod 列表（支持按运行时和命名空间筛选）
 - **实时 WebSocket**：Pod 创建/删除/状态变更即时推送
 - 创建 Pod（带表单：运行时、镜像、资源、端口、标签）
+- 🛡️ **快速 TDX** 按钮：一键创建 TDX 加密容器
 - 删除 Pod（带淡出动画）
 - 📋 查看 Pod YAML 配置
 - 🔍 Pod 详情展开：内核版本、内存、运行时间
 - 📜 **K8s Events 生命周期时间线**（Scheduled → Pulling → Started）
-- 🔬 进程隔离验证：
-  - 宿主机可见进程 vs 容器内实际进程（kubectl exec 获取）
-  - 点击 PID 验证内存可读性（ptrace + /proc/pid/mem）
-  - TDX 容器：宿主机 PID 25 是[内核线程]，完全不是容器内的 nginx
-- 🔐 **内存加密验证**（新增）：
-  - 全自动模式：写入测试数据 → 宿主机读 QEMU 内存 → 密文；容器内读 → 明文
-  - 半自动模式：手动指定 PID，对比宿主机与容器内内存视图
-  - Hex dump 对比 + Shannon 熵值分析
-  - 密文区域高熵值（~7.9），明文区域低熵值（~4.5）
+- 🔬 **进程隔离验证**：宿主机可见进程 vs 容器内实际进程
+- 📝 **写入数据面板**：自定义数据写入容器 `/dev/shm/`，支持多条数据管理
+  - 📝 写入：将数据写入容器内 tmpfs，每次生成唯一文件名 `proof_N.txt`
+  - 🔍 读取：批量读取容器内所有已写入数据
+  - 🗑️ 删除：按条目删除指定数据
+- 📄 **查看内存**弹窗：
+  - **TDX 容器**：显示 QEMU 虚拟机 RAM 真实地址 + MKTME 加密后的内存数据（全零=加密证明）
+  - **普通容器**：显示进程栈真实地址 + 文件内容 hex dump（宿主机可直接读取）
+- 🔐 **内存加密验证**（全自动/半自动模式）
 
 ### 🔄 运行时 (`/runtimes`)
 - 10 个 RuntimeClass 列表
@@ -91,7 +92,7 @@
 
 ---
 
-## 🔌 API 端点（15 个）
+## 🔌 API 端点（18 个）
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
@@ -102,13 +103,16 @@
 | GET | `/api/pods/:ns/:name/logs` | Pod 日志 |
 | GET | `/api/pods/info/:ns/:name` | Pod 系统信息 + 进程对比 + 隔离证据 |
 | GET | `/api/pods/:ns/:name/yaml` | Pod YAML 配置 |
-| GET | `/api/pods/:ns/:name/events` | 🆕 K8s Events 生命周期时间线 |
+| GET | `/api/pods/:ns/:name/events` | K8s Events 生命周期时间线 |
 | GET | `/api/proc/:pid/mem` | 进程内存读取验证（ptrace） |
 | GET | `/api/runtimes` | RuntimeClass 列表 |
 | GET | `/api/runtimes/:name` | RuntimeClass 详情 |
 | GET | `/api/trustee` | Trustee 证明链状态 |
-| GET | `/api/demo/memory-encrypt` | 🆕 内存加密全自动验证 |
-| GET | `/api/demo/memory-compare` | 🆕 内存加密半自动验证 |
+| POST | `/api/demo/write-and-read` | 写入数据到容器 + 宿主内存读取对比 |
+| POST | `/api/demo/read-mem` | 批量读取容器内所有已写入数据 |
+| POST | `/api/demo/delete-proof` | 删除容器内指定 proof 文件 |
+| GET | `/api/demo/memory-encrypt` | 内存加密全自动验证 |
+| GET | `/api/demo/memory-compare` | 内存加密半自动验证 |
 | GET | `/health` | 健康检查 |
 
 ### WebSocket 事件
@@ -136,10 +140,16 @@ pkill coco-serve
 curl -s http://localhost:8080/health
 ss -tlnp | grep 8080
 
-# 重新构建（前端改动后）
-cd /root/yuxi-workspace/project/coco && npx vite build
-cp -r dist /root/yuxi-workspace/project/coco-serve/
-cd /root/yuxi-workspace/project/coco-serve && go build -o coco-serve .
+# 完整重新构建（前端改动后）
+cd /root/yuxi-workspace/project/coco && npm run build && \
+  rm -rf /root/yuxi-workspace/project/coco-serve/dist && \
+  cp -r dist /root/yuxi-workspace/project/coco-serve/dist && \
+  cd /root/yuxi-workspace/project/coco-serve && go build -o coco-serve . && \
+  pkill coco-serve; sleep 1; nohup ./coco-serve > /var/log/coco-serve.log 2>&1 &
+
+# 仅后端改动
+cd /root/yuxi-workspace/project/coco-serve && go build -o coco-serve . && \
+  pkill coco-serve; sleep 1; nohup ./coco-serve > /var/log/coco-serve.log 2>&1 &
 
 # 查看日志
 tail -f /var/log/coco-serve.log
@@ -176,28 +186,29 @@ tail -f /var/log/coco-serve.log
 
 ## 🧪 隔离证明演示流程
 
+### 基础隔离验证
 1. 打开 `http://IP:8080/pods`
-2. 展开 TDX Pod（如 `tdx-nginx`）
-3. 看到：宿主机只有 2 个 QEMU 进程，容器内 nginx(PID=25) 标注"宿主机不可见"
-4. 点击 nginx 的「📖 验证」：显示"宿主机 PID 25 是[内核线程]，完全不是容器内的 nginx"
-5. 展开普通 Pod（如 `mysql-demo`）对比：宿主机可见所有 containerd-shim 进程
-6. 在总览页点击 TDX 硬件卡片 → 跳转到证明链页面查看 Trustee 组件详情
+2. 展开 TDX Pod → 宿主机只看到 QEMU 进程，容器内真实进程标注"宿主机不可见"
+3. 展开普通 Pod 对比 → 宿主机可见所有 containerd-shim 进程
 
-### 🆕 内存加密验证演示
+### 📝 数据写入 & 内存查看（核心演示）
+1. 点击 Pod 的 📝 按钮 → 打开写入数据面板
+2. 输入自定义数据（如"你好"）→ 点击「📝 写入」
+3. 数据写入容器 `/dev/shm/proof_N.txt`，面板显示结果：
+   - ✅ 容器内存在 / ✅ 加密保护
+   - Note 说明宿主机是否可读
+4. 点击「📄 查看内存」→ 弹窗展示：
+   - **TDX 容器**：真实 QEMU Guest-RAM 地址 `0x7f8b...` + entropy 0.0 全零密文（MKTME 保护）
+   - **普通容器**：进程栈真实地址 `0x7fff...` + 文件内容 hex dump（宿主机可读）
+5. 支持多条数据管理：点击「🔍 读取」批量加载，「🗑️」逐条删除
 
-1. 展开任意 TDX Pod（如 `tdx-nginx`）
-2. 滚动到「🔐 内存加密验证」面板
-3. 点击「🔄 一键验证 (全自动)」：
-   - 后端自动在容器内写入测试数据 → 从宿主机读 QEMU 内存（密文） → 从容器内读（明文）
-   - 左侧红色边框：宿主机视角 hex dump，高熵值（~7.9），无法找到明文
-   - 右侧绿色边框：容器内视角，低熵值（~4.5），明文完整可见
-4. 或使用「🔍 手动对比 (半自动)」：指定 QEMU PID，读取宿主机侧内存内容
+### 🔐 内存加密全自动验证
+1. 展开 TDX Pod → 「🔐 内存加密验证」面板
+2. 点击「🔄 一键验证」：自动写入 → 宿主机/QEMU 内存读取 → 容器内读取 → 对比
 
-### 🆕 创建时间线演示
-
-1. 创建 Pod 后，实时 WebSocket 推送阶段变化（Pending → ContainerCreating → Running）
-2. 展开 Pod 详情，查看「📜 生命周期」时间线
-3. 每个 K8s Event 显示时间戳、原因、详细消息
+### 📜 生命周期时间线
+1. 创建 Pod 后 WebSocket 实时推送阶段变化
+2. 展开 Pod 详情查看「📜 生命周期」
 
 ---
 
