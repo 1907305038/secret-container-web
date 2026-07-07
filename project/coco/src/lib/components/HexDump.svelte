@@ -7,9 +7,10 @@
 		variant?: 'cipher' | 'plain' | 'unknown';
 		note?: string;
 		baseAddr?: number;
+		addrLabel?: string;      // 地址列标题
 	}
 
-	let { hexData, asciiSafe = '', label = '', entropy = 0, variant = 'unknown', note = '', baseAddr = 0 }: Props = $props();
+	let { hexData, asciiSafe = '', label = '', entropy = 0, variant = 'unknown', note = '', baseAddr = 0, addrLabel = '内存地址' }: Props = $props();
 
 	// 每 32 个 hex 字符 (16 字节) 一行
 	let rows: { hex: string; ascii: string }[] = $derived.by(() => {
@@ -35,7 +36,7 @@
 	{/if}
 	<div class="hex-body">
 		<div class="hex-row hex-header">
-			<span class="hex-offset">内存地址</span>
+			<span class="hex-offset">{addrLabel}</span>
 			<span class="hex-values">16进制数据</span>
 			<span class="hex-ascii">ASCII</span>
 		</div>
