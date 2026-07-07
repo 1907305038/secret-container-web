@@ -135,6 +135,9 @@
 			writeLoading = { ...writeLoading };
 			return;
 		}
+		// 写入成功，清空输入框
+		customData[key] = '';
+		customData = { ...customData };
 		// 追加到数组，不覆盖
 		writeResults[key] = [...(writeResults[key] || []), d];
 		writeResults = { ...writeResults };
@@ -654,7 +657,20 @@
 				<button class="mem-modal-close" onclick={closeMemModal}>✕</button>
 			</div>
 			<div class="mem-modal-body">
-				{#if modalWR?.plaintext}
+				{#if modalWR?.is_tdx}
+					<div class="mem-modal-tdx">🔒 TDX 加密保护</div>
+					<div class="mem-modal-info">容器内数据: {modalWR.plaintext}</div>
+					<div class="mem-modal-info">宿主机无法读取此内存数据 — MKTME 硬件加密生效</div>
+					{#if modalWR?.memory_regions?.length}
+						<div class="write-regions-title" style="margin-top:8px">宿主机 QEMU 内存扫描 (未找到明文):</div>
+						{#each modalWR.memory_regions.slice(0, 3) as region}
+							<div class="write-region">
+								<div class="wr-addr">{region.address}</div>
+								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" />
+							</div>
+						{/each}
+					{/if}
+				{:else if modalWR?.plaintext}
 					{@const bytes = new TextEncoder().encode(modalWR.plaintext)}
 					{@const hexStr = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}
 					{@const asciiStr = Array.from(bytes).map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('')}
@@ -1012,6 +1028,7 @@
 	.mem-modal-close:hover { background: #fee2e2; color: #ef4444; }
 	.mem-modal-body { padding: 12px 16px; }
 	.mem-modal-empty { text-align: center; color: #94a3b8; padding: 2rem; }
+	.mem-modal-tdx { font-size: 0.9rem; font-weight: 700; color: #166534; background: #dcfce7; padding: 6px 12px; border-radius: 6px; margin-bottom: 8px; }
 
 	.loading { text-align: center; padding: 2rem; color: #94a3b8; animation: pulse 1.5s infinite; }
 </style>
