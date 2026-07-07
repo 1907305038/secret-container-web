@@ -156,18 +156,26 @@
 		});
 		const d = await r.json();
 		const arr = writeResults[key] || [];
-		// 如果是空数据（容器内无内容），不追加到列表
 		if (!d.plaintext || d.note?.includes('无数据')) {
 			msg = d.note || '容器内无数据，请先写入';
 			writeLoading[key] = false;
 			writeLoading = { ...writeLoading };
 			return;
 		}
-		// 去重：如果最新一条数据相同，不追加
-		const last = arr[arr.length - 1];
-		if (!last || last.plaintext !== d.plaintext || last.plaintext_found !== d.plaintext_found) {
-			writeResults[key] = [...arr, d];
-			writeResults = { ...writeResults };
+		// entries 数组 → 逐条添加所有文件
+		if (d.entries?.length) {
+			const existing = new Set(arr.map((a: any) => a.file_name));
+			const newEntries = d.entries.filter((e: any) => !existing.has(e.file_name)).map((e: any) => ({ ...d, plaintext: e.content, file_name: e.file_name, guest_confirmed: true }));
+			if (newEntries.length > 0) {
+				writeResults[key] = [...arr, ...newEntries];
+				writeResults = { ...writeResults };
+			}
+		} else {
+			const last = arr[arr.length - 1];
+			if (!last || last.plaintext !== d.plaintext || last.plaintext_found !== d.plaintext_found) {
+				writeResults[key] = [...arr, d];
+				writeResults = { ...writeResults };
+			}
 		}
 		writeLoading[key] = false;
 		writeLoading = { ...writeLoading };
