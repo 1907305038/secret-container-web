@@ -116,6 +116,7 @@
 	let writeLoading = $state<Record<string, boolean>>({});
 	let customData = $state<Record<string, string>>({});
 	let showWriteForm = $state<Record<string, boolean>>({});
+	let showMemRegions = $state<Record<string, boolean>>({}); // 内存区域折叠
 
 	async function writeAndRead(ns: string, name: string) {
 		const key = `${ns}/${name}`;
@@ -144,9 +145,13 @@
 			body: JSON.stringify({ pod: name, ns })
 		});
 		const d = await r.json();
-		// 追加到数组
-		writeResults[key] = [...(writeResults[key] || []), d];
-		writeResults = { ...writeResults };
+		const arr = writeResults[key] || [];
+		// 去重：如果最新一条数据相同，不追加
+		const last = arr[arr.length - 1];
+		if (!last || last.plaintext !== d.plaintext || last.plaintext_found !== d.plaintext_found) {
+			writeResults[key] = [...arr, d];
+			writeResults = { ...writeResults };
+		}
 		writeLoading[key] = false;
 		writeLoading = { ...writeLoading };
 	}
@@ -407,15 +412,20 @@
 								</div>
 								<div class="write-note">{wr.note}</div>
 								{#if isLast && wr.memory_regions?.length}
-									<div class="write-regions">
-										<div class="write-regions-title">内存区域 (PID: {wr.host_pid})</div>
-										{#each wr.memory_regions.slice(0, 4) as region}
-											<div class="write-region">
-												<div class="wr-addr">{region.address}</div>
-												<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={wr.plaintext_found ? 'plain' : 'cipher'} />
-											</div>
-										{/each}
-									</div>
+									{@const regKey = key + '_' + idx}
+									<button class="mem-toggle" onclick={(e) => { e.stopPropagation(); showMemRegions[regKey] = !showMemRegions[regKey]; showMemRegions = {...showMemRegions}; }}>
+										{showMemRegions[regKey] ? '🔼' : '🔽'} 内存区域 (PID: {wr.host_pid}, {wr.memory_regions.length} 个)
+									</button>
+									{#if showMemRegions[regKey]}
+										<div class="write-regions" in:fade={{ duration: 150 }}>
+											{#each wr.memory_regions.slice(0, 4) as region}
+												<div class="write-region">
+													<div class="wr-addr">{region.address}</div>
+													<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={wr.plaintext_found ? 'plain' : 'cipher'} />
+												</div>
+											{/each}
+										</div>
+									{/if}
 								{/if}
 							</div>
 						{/each}
@@ -896,6 +906,11 @@
 		font-size: 0.65rem; color: #64748b; font-family: monospace;
 		margin-bottom: 2px;
 	}
+	.mem-toggle {
+		font-size: 0.7rem; color: #64748b; background: #f1f5f9; border: 1px solid #e2e8f0;
+		border-radius: 4px; padding: 3px 8px; cursor: pointer; margin-top: 4px; transition: all 0.15s;
+	}
+	.mem-toggle:hover { background: #e2e8f0; border-color: #94a3b8; }
 
 	.loading { text-align: center; padding: 2rem; color: #94a3b8; animation: pulse 1.5s infinite; }
 </style>
