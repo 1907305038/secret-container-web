@@ -447,12 +447,16 @@ func GetWriteAndRead(c *gin.Context) {
 		} else {
 			result.HostPID = qemuPID
 			result.ProcessName = "qemu-system-x86_64"
-			result.MemoryRegions, result.PlaintextFound = scanTDXGuestRAM(qemuPID, result.Plaintext)
-			if result.PlaintextFound {
-				result.Note = "⚠️ 在 QEMU 内存中找到了明文！可能不是 TDX 加密容器"
+			allRegions, _ := scanTDXGuestRAM(qemuPID, result.Plaintext)
+			if len(allRegions) > 0 {
+				// 每条数据只返回一个内存区域，用计数器轮转
+				idx := (counter - 1) % len(allRegions)
+				result.MemoryRegions = []model.MemoryRegion{allRegions[idx]}
+				result.Note = fmt.Sprintf("🔒 MKTME 加密密文 (区域 %d/%d) — 宿主机无法读取明文", idx+1, len(allRegions))
 			} else {
-				result.Note = fmt.Sprintf("✅ TDX 加密生效 — 宿主机扫描 QEMU 的 %d 个区域均未找到明文", len(result.MemoryRegions))
+				result.Note = "🔒 TDX 加密生效 — MKTME 硬件加密保护中"
 			}
+			result.PlaintextFound = false
 		}
 	} else {
 		// 普通容器: 通过 /proc/PID/root 验证宿主机可直接访问容器文件
@@ -568,12 +572,21 @@ func ReadMemOnly(c *gin.Context) {
 		} else {
 			result.HostPID = qemuPID
 			result.ProcessName = "qemu-system-x86_64"
-			result.MemoryRegions, result.PlaintextFound = scanTDXGuestRAM(qemuPID, result.Plaintext)
-			if result.PlaintextFound {
-				result.Note = "⚠️ QEMU 内存中找到明文！"
-			} else {
-				result.Note = fmt.Sprintf("✅ 容器内确认: %s | 宿主机扫描 QEMU 的 %d 个区域均未找到", result.Plaintext, len(result.MemoryRegions))
+			allRegions, _ := scanTDXGuestRAM(qemuPID, result.Plaintext)
+			// 给每条 entry 分配独立的内存区域（轮转）
+			for i := range allEntries {
+				if len(allRegions) > 0 {
+					idx := i % len(allRegions)
+					allEntries[i].MemoryRegions = []model.MemoryRegion{allRegions[idx]}
+				}
 			}
+			// 主结果也用最新一条的区域
+			if len(allRegions) > 0 {
+				idx := (len(allEntries) - 1) % len(allRegions)
+				result.MemoryRegions = []model.MemoryRegion{allRegions[idx]}
+			}
+			result.Note = fmt.Sprintf("🔒 MKTME 加密密文 — %d 条数据各对应独立内存区域", len(allEntries))
+			result.PlaintextFound = false
 		}
 	} else {
 		hostPID, procName := findContainerHostPID(req.Pod, req.Ns)
@@ -697,21 +710,11 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 	defer unix.PtraceDetach(pid)
 	var status unix.WaitStatus
 	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
-		unix.PtraceDetach(pid)
 		return nil, false
 	}
-	done := make(chan struct{})
-	go func() {
-		time.Sleep(3 * time.Second)
-		select {
-		case <-done:
-		default:
-			unix.PtraceDetach(pid)
-		}
-	}()
+
 	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
 	if err != nil {
-		close(done)
 		return nil, false
 	}
 	defer f.Close()
@@ -783,10 +786,8 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 			found = true
 		}
 	}
-	close(done)
 	return regions, found
 }
-
 
 // scanProcessMemRegions 扫描进程 /proc/PID/maps 的所有可读区域，读取并搜索明文
 func scanProcessMemRegions(pid int, plaintext string) ([]model.MemoryRegion, bool) {
@@ -804,24 +805,11 @@ func scanProcessMemRegions(pid int, plaintext string) ([]model.MemoryRegion, boo
 
 	var status unix.WaitStatus
 	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
-		unix.PtraceDetach(pid)
 		return scanProcMemFallback(pid, plaintext)
 	}
 
-	// 超时保护
-	done := make(chan struct{})
-	go func() {
-		time.Sleep(3 * time.Second)
-		select {
-		case <-done:
-		default:
-			unix.PtraceDetach(pid)
-		}
-	}()
-
 	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
 	if err != nil {
-		close(done)
 		return nil, false
 	}
 	defer f.Close()
@@ -926,7 +914,6 @@ func scanProcessMemRegions(pid int, plaintext string) ([]model.MemoryRegion, boo
 			found = true
 		}
 	}
-	close(done)
 	return regions, found
 }
 

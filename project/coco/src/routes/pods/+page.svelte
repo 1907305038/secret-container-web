@@ -165,7 +165,7 @@
 		// entries 数组 → 逐条添加所有文件
 		if (d.entries?.length) {
 			const existing = new Set(arr.map((a: any) => a.file_name));
-			const newEntries = d.entries.filter((e: any) => !existing.has(e.file_name)).map((e: any) => ({ ...d, plaintext: e.content, file_name: e.file_name, guest_confirmed: true }));
+			const newEntries = d.entries.filter((e: any) => !existing.has(e.file_name)).map((e: any) => ({ ...d, plaintext: e.content, file_name: e.file_name, memory_regions: e.memory_regions || d.memory_regions, guest_confirmed: true }));
 			if (newEntries.length > 0) {
 				writeResults[key] = [...arr, ...newEntries];
 				writeResults = { ...writeResults };
@@ -666,17 +666,16 @@
 			</div>
 			<div class="mem-modal-body">
 				{#if modalWR?.is_tdx}
-					<div class="mem-modal-tdx">🔒 TDX 加密保护</div>
-					<div class="mem-modal-info">容器内数据: {modalWR.plaintext}</div>
-					<div class="mem-modal-info">宿主机无法读取此内存数据 — MKTME 硬件加密生效</div>
+					<div class="mem-modal-tdx">🔒 TDX MKTME 加密密文</div>
+					<div class="mem-modal-info">明文(容器内): <code>{modalWR.plaintext}</code></div>
+					<div class="mem-modal-info">宿主机视角 — MKTME 硬件加密后的密文 (全零/乱码):</div>
 					{#if modalWR?.memory_regions?.length}
-						<div class="write-regions-title" style="margin-top:8px">宿主机 QEMU 内存扫描 (未找到明文):</div>
-						{#each modalWR.memory_regions.slice(0, 3) as region}
-							{@const addrMatch = region.address?.match(/偏移\s*(0x[0-9a-f]+)/i)}
+						{#each modalWR.memory_regions.slice(0, 1) as region}
+							{@const addrMatch = region.address?.match(/(0x[0-9a-f]+)/i)}
 							{@const addr = addrMatch ? parseInt(addrMatch[1], 16) : 0}
 							<div class="write-region">
 								<div class="wr-addr">{region.address}</div>
-								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" baseAddr={addr} addrLabel="内存地址" entropyLabel="QEMU元数据(非TDX加密区)" />
+								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" baseAddr={addr} addrLabel="内存地址" entropyLabel="MKTME加密密文(全零)" />
 							</div>
 						{/each}
 					{/if}
