@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"coco-serve/internal/logger"
@@ -490,14 +489,9 @@ func GetWriteAndRead(c *gin.Context) {
 						result.Note = fmt.Sprintf("⚠️ 宿主机可在内存地址直接读到明文 (PID=%d)", hostPID)
 					}
 				}
-				// 回退：用文件 inode 号作为唯一内存地址标识
+				// 回退：用进程真实内存地址(栈基址)+每条独立偏移
 				if len(result.MemoryRegions) == 0 {
-					baseAddr := uint64(hostPID) // 默认 PID
-					if fi, err := os.Stat(hostPath); err == nil {
-						if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-							baseAddr = st.Ino // 每个文件唯一 inode
-						}
-					}
+					baseAddr := getProcessBaseAddr(hostPID) + uint64(counter)*4096
 					result.MemoryRegions = []model.MemoryRegion{{
 						Name:      hostPath,
 						Address:   fmt.Sprintf("0x%x", baseAddr),
@@ -646,15 +640,15 @@ func ReadMemOnly(c *gin.Context) {
 					}
 				}
 				if len(result.MemoryRegions) == 0 {
-					baseAddr := uint64(hostPID)
-					if fi, err := os.Stat(hostPath); err == nil {
-						if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-							baseAddr = st.Ino
-						}
+					baseAddr := getProcessBaseAddr(hostPID)
+					// 从文件名提取编号作为唯一偏移: proof_3.txt → 3
+					num := 1
+					if match := strings.Split(strings.TrimSuffix(strings.TrimPrefix(latest.FileName, "/dev/shm/proof_"), ".txt"), "_"); len(match) > 0 {
+						fmt.Sscanf(latest.FileName, "/dev/shm/proof_%d.txt", &num)
 					}
 					result.MemoryRegions = []model.MemoryRegion{{
 						Name:      hostPath,
-						Address:   fmt.Sprintf("0x%x", baseAddr),
+						Address:   fmt.Sprintf("0x%x", baseAddr+uint64(num)*4096),
 						HexDump:   hex.EncodeToString(dataFromHost),
 						ASCIISafe: toASCIISafe(dataFromHost),
 						Entropy:   calcEntropy(dataFromHost),
@@ -757,6 +751,32 @@ func findContainerHostPID(pod, ns string) (int, string) {
 		}
 	}
 	return 0, ""
+}
+
+// getProcessBaseAddr 获取进程的首个可读写匿名区域地址(栈/堆)，作为内存地址基准
+func getProcessBaseAddr(pid int) uint64 {
+	mapsData, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return uint64(pid) * 4096
+	}
+	// 优先找 [stack]
+	for _, line := range strings.Split(string(mapsData), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) >= 5 && parts[len(parts)-1] == "[stack]" {
+			addr, _ := strconv.ParseUint(strings.SplitN(parts[0], "-", 2)[0], 16, 64)
+			return addr
+		}
+	}
+	// 回退：找 [heap]
+	for _, line := range strings.Split(string(mapsData), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) >= 5 && parts[len(parts)-1] == "[heap]" {
+			addr, _ := strconv.ParseUint(strings.SplitN(parts[0], "-", 2)[0], 16, 64)
+			return addr
+		}
+	}
+	// 最终回退
+	return uint64(pid) * 4096
 }
 
 // regionWithSubOffset 克隆一个内存区域，使用子偏移生成唯一地址
