@@ -1,14 +1,15 @@
 <script lang="ts">
 	interface Props {
-		hexData: string;          // hex 字符串 (无空格)
-		asciiSafe?: string;       // ASCII 预览
-		label?: string;           // 区域标签
-		entropy?: number;         // 熵值
-		variant?: 'cipher' | 'plain' | 'unknown';  // 密文/明文/未知
-		note?: string;            // 底部备注
+		hexData: string;
+		asciiSafe?: string;
+		label?: string;
+		entropy?: number;
+		variant?: 'cipher' | 'plain' | 'unknown';
+		note?: string;
+		baseAddr?: number;
 	}
 
-	let { hexData, asciiSafe = '', label = '', entropy = 0, variant = 'unknown', note = '' }: Props = $props();
+	let { hexData, asciiSafe = '', label = '', entropy = 0, variant = 'unknown', note = '', baseAddr = 0 }: Props = $props();
 
 	// 每 32 个 hex 字符 (16 字节) 一行
 	let rows: { hex: string; ascii: string }[] = $derived.by(() => {
@@ -40,7 +41,7 @@
 		</div>
 		{#each rows as row, idx}
 			<div class="hex-row">
-				<span class="hex-offset">{(idx * 16).toString(16).padStart(8, '0')}</span>
+				<span class="hex-offset">{(baseAddr + idx * 16).toString(16).padStart(8, '0')}</span>
 				<span class="hex-values">{row.hex}</span>
 				<span class="hex-ascii">|{row.ascii}|</span>
 			</div>

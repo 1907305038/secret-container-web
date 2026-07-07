@@ -664,9 +664,11 @@
 					{#if modalWR?.memory_regions?.length}
 						<div class="write-regions-title" style="margin-top:8px">宿主机 QEMU 内存扫描 (未找到明文):</div>
 						{#each modalWR.memory_regions.slice(0, 3) as region}
+							{@const addrMatch = region.address?.match(/偏移\s*(0x[0-9a-f]+)/i)}
+							{@const addr = addrMatch ? parseInt(addrMatch[1], 16) : 0}
 							<div class="write-region">
 								<div class="wr-addr">{region.address}</div>
-								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" />
+								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" baseAddr={addr} />
 							</div>
 						{/each}
 					{/if}
