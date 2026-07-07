@@ -111,8 +111,8 @@
 	let encryptProofs = $state<Record<string, MemoryEncryptProof>>({});
 	let proofLoading = $state<Record<string, boolean>>({});
 
-	// 写入数据 + 读取内存对比
-	let writeResults = $state<Record<string, WriteAndReadResult>>({});
+	// 写入数据 + 读取内存对比（数组，保留所有写入历史）
+	let writeResults = $state<Record<string, WriteAndReadResult[]>>({});
 	let writeLoading = $state<Record<string, boolean>>({});
 	let customData = $state<Record<string, string>>({});
 	let showWriteForm = $state<Record<string, boolean>>({});
@@ -127,7 +127,8 @@
 			body: JSON.stringify({ pod: name, ns, data: customData[key] || '' })
 		});
 		const d = await r.json();
-		writeResults[key] = d;
+		// 追加到数组，不覆盖
+		writeResults[key] = [...(writeResults[key] || []), d];
 		writeResults = { ...writeResults };
 		writeLoading[key] = false;
 		writeLoading = { ...writeLoading };
@@ -143,7 +144,8 @@
 			body: JSON.stringify({ pod: name, ns })
 		});
 		const d = await r.json();
-		writeResults[key] = d;
+		// 追加到数组
+		writeResults[key] = [...(writeResults[key] || []), d];
 		writeResults = { ...writeResults };
 		writeLoading[key] = false;
 		writeLoading = { ...writeLoading };
@@ -389,31 +391,34 @@
 						</button>
 						<button class="write-act-btn close" onclick={(e) => { e.stopPropagation(); showWriteForm[key] = false; showWriteForm = {...showWriteForm}; }}>✕</button>
 					</div>
-					{#if writeResults[key]}
-						{@const wr = writeResults[key]}
-						<div class="write-result" in:fade={{ delay: 80 }}>
-							<div class="write-result-header">
-								📝 <code>{wr.plaintext}</code>
-								{#if wr.guest_confirmed}
-									<span class="write-badge safe">✅ 容器内存在</span>
-								{/if}
-								<span class="write-badge {wr.plaintext_found ? 'found' : 'safe'}">
-									{wr.plaintext_found ? '⚠️ 宿主机可读' : '✅ 加密保护'}
-								</span>
-							</div>
-							<div class="write-note">{wr.note}</div>
-							{#if wr.memory_regions?.length}
-								<div class="write-regions">
-									<div class="write-regions-title">内存区域 (PID: {wr.host_pid} — {wr.process_name?.split(' ')[0] || 'unknown'})</div>
-									{#each wr.memory_regions.slice(0, 6) as region}
-										<div class="write-region">
-											<div class="wr-addr">{region.address}</div>
-											<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={wr.plaintext_found ? 'plain' : 'cipher'} />
-										</div>
-									{/each}
+					{#if writeResults[key]?.length}
+						{#each writeResults[key] as wr, idx}
+							{@const isLast = idx === writeResults[key].length - 1}
+							<div class="write-result" class:latest={isLast} in:fade={{ delay: 80 }}>
+								<div class="write-result-header">
+									<span class="write-idx">#{idx + 1}</span>
+									<code>{wr.plaintext}</code>
+									{#if wr.guest_confirmed}
+										<span class="write-badge safe">✅ 容器内存在</span>
+									{/if}
+									<span class="write-badge {wr.plaintext_found ? 'found' : 'safe'}">
+										{wr.plaintext_found ? '⚠️ 宿主机可读' : '✅ 加密保护'}
+									</span>
 								</div>
-							{/if}
-						</div>
+								<div class="write-note">{wr.note}</div>
+								{#if isLast && wr.memory_regions?.length}
+									<div class="write-regions">
+										<div class="write-regions-title">内存区域 (PID: {wr.host_pid})</div>
+										{#each wr.memory_regions.slice(0, 4) as region}
+											<div class="write-region">
+												<div class="wr-addr">{region.address}</div>
+												<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={wr.plaintext_found ? 'plain' : 'cipher'} />
+											</div>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						{/each}
 					{/if}
 				</div>
 			{/if}
@@ -855,9 +860,10 @@
 
 	/* 写入结果面板 */
 	.write-result {
-		margin-top: 4px; background: #f8fafc; border: 1px solid #e2e8f0;
-		border-radius: 8px; padding: 10px 12px;
+		margin-top: 4px; background: #fff; border: 1px solid #e2e8f0;
+		border-radius: 8px; padding: 8px 10px;
 	}
+	.write-result.latest { border-color: #3b82f6; box-shadow: 0 0 0 1px #bfdbfe; }
 	.write-result-header {
 		font-size: 0.78rem; font-weight: 600; margin-bottom: 4px;
 		display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -865,6 +871,10 @@
 	.write-result-header code {
 		background: #1e293b; color: #4ade80; padding: 2px 8px;
 		border-radius: 4px; font-size: 0.72rem;
+	}
+	.write-idx {
+		font-size: 0.6rem; background: #e2e8f0; color: #64748b;
+		padding: 1px 5px; border-radius: 4px; font-weight: 700; margin-right: 2px;
 	}
 	.write-badge {
 		font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600;
