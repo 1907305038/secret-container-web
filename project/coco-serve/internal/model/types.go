@@ -146,6 +146,13 @@ type WriteAndReadResult struct {
 	PlaintextFound bool           `json:"plaintext_found"` // 宿主机内存中是否找到明文
 	GuestConfirmed bool           `json:"guest_confirmed"` // 容器内确认数据存在
 	AllWrites      int            `json:"all_writes"`      // 已写入的文件总数
-	FileName       string         `json:"file_name"`       // 容器内文件名
+	FileName        string         `json:"file_name"`
+	Entries         []ProofEntry   `json:"entries,omitempty"`
 	Note           string         `json:"note"`
+}
+
+// ProofEntry 单个 proof 文件
+type ProofEntry struct {
+	FileName string `json:"file_name"`
+	Content  string `json:"content"`
 }

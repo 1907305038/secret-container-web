@@ -506,26 +506,46 @@ func ReadMemOnly(c *gin.Context) {
 
 	result := model.WriteAndReadResult{Pod: req.Ns + "/" + req.Pod}
 
-	// 从容器内读取最新存在的 proof 文件
-	latestCmd := "ls /dev/shm/proof_*.txt 2>/dev/null | sort -V | tail -1"
-	latestFile, err := execPodCmd(req.Pod, req.Ns, latestCmd)
-	if err != nil || latestFile == "" {
+	// 列出所有 proof 文件
+	listCmd := "ls /dev/shm/proof_*.txt 2>/dev/null | sort -V"
+	listOut, err := execPodCmd(req.Pod, req.Ns, listCmd)
+	if err != nil || listOut == "" {
 		result.Note = "容器内无数据，请先写入"
 		c.JSON(http.StatusOK, result)
 		return
 	}
-	if guestData, err := execPodCmd(req.Pod, req.Ns, "cat "+strings.TrimSpace(latestFile)); err == nil && guestData != "" {
-		result.Plaintext = strings.TrimSpace(guestData)
-		result.FileName = strings.TrimSpace(latestFile)
-		result.GuestConfirmed = true
-		if allFiles, err := execPodCmd(req.Pod, req.Ns, "ls /dev/shm/proof_*.txt 2>/dev/null | wc -l"); err == nil {
-			result.AllWrites, _ = strconv.Atoi(strings.TrimSpace(allFiles))
+
+	// 读取所有文件内容
+	files := strings.Split(strings.TrimSpace(listOut), "\n")
+	var allEntries []model.ProofEntry
+	for _, f := range files {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
 		}
-	} else {
+		content, err := execPodCmd(req.Pod, req.Ns, "cat "+f)
+		if err != nil || content == "" {
+			continue
+		}
+		allEntries = append(allEntries, model.ProofEntry{
+			FileName: f,
+			Content:  strings.TrimSpace(content),
+		})
+	}
+
+	if len(allEntries) == 0 {
 		result.Note = "容器内无数据，请先写入"
 		c.JSON(http.StatusOK, result)
 		return
 	}
+
+	// 用最新一条作为主结果
+	latest := allEntries[len(allEntries)-1]
+	result.Plaintext = latest.Content
+	result.FileName = latest.FileName
+	result.GuestConfirmed = true
+	result.AllWrites = len(allEntries)
+	result.Entries = allEntries
 
 	// 判断是否 TDX
 	isTdx := false
@@ -562,7 +582,7 @@ func ReadMemOnly(c *gin.Context) {
 		} else {
 			result.HostPID = hostPID
 			result.ProcessName = procName
-			hostPath := fmt.Sprintf("/proc/%d/root%s", hostPID, latestFile)
+			hostPath := fmt.Sprintf("/proc/%d/root%s", hostPID, latest.FileName)
 			dataFromHost, err := os.ReadFile(hostPath)
 			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
 				result.PlaintextFound = true
