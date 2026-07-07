@@ -380,7 +380,7 @@
 			{#if showWriteForm[key]}
 				<div class="write-panel" in:slide={{ duration: 200 }}>
 					<div class="write-input-row">
-						<input class="write-input" type="text" placeholder="输入要写入的数据，留空自动生成" bind:value={(customData[key] || '')} oninput={(e) => { customData[key] = e.target.value; customData = {...customData}; }} />
+						<input class="write-input" type="text" placeholder="输入要写入的数据，留空自动生成" value={customData[key] || ''} oninput={(e) => { customData[key] = e.target.value; customData = {...customData}; }} />
 						<button class="write-act-btn" onclick={(e) => { e.stopPropagation(); writeAndRead(pod.namespace, pod.name); }} disabled={writeLoading[key]}>
 							{writeLoading[key] ? '⏳' : '📝'} 写入
 						</button>
