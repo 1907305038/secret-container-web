@@ -875,44 +875,15 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 			continue // 小于2MB不是虚拟机RAM
 		}
 
-		// 多位置扫描：开头、末尾、以及多个等分点，优先取高熵非零密文
+		offset := start + size/2
 		readSize := 256
-		var data []byte
-		var bestOffset int64
-		bestEntropy := 0.0
 
-		// 生成候选偏移列表：开头、末尾、1/8 等分点
-		var candidates []int64
-		candidates = append(candidates, start) // 区域开头
-		for i := int64(1); i < 8; i++ {
-			candidates = append(candidates, start+(end-start)*i/8)
-		}
-		candidates = append(candidates, end-int64(readSize)-1) // 区域末尾
-		if end-start > 16384 {
-			candidates = append(candidates, start+4096, start+8192, start+16384) // 小偏移
-			candidates = append(candidates, end-16384, end-8192, end-4096)       // 末尾附近
-		}
-
-		for _, off := range candidates {
-			if off < start || off >= end-int64(readSize) {
-				continue
-			}
-			buf := make([]byte, readSize)
-			n, err := f.ReadAt(buf, off)
-			if err != nil || n == 0 {
-				continue
-			}
-			ent := calcEntropy(buf[:n])
-			// 优先选最高熵（最像密文）的非零数据
-			if ent > bestEntropy {
-				bestEntropy = ent
-				data = buf[:n]
-				bestOffset = off
-			}
-		}
-		if len(data) == 0 {
+		buf := make([]byte, readSize)
+		n, err := f.ReadAt(buf, offset)
+		if err != nil || n == 0 {
 			continue
 		}
+		data := buf[:n]
 		count++
 
 		hexStr := hex.EncodeToString(data)
@@ -922,7 +893,7 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 
 		regions = append(regions, model.MemoryRegion{
 			Name:      fmt.Sprintf("TDX-Guest-RAM-%d", count),
-			Address:   fmt.Sprintf("0x%x-0x%x @0x%x", start, end, bestOffset),
+			Address:   fmt.Sprintf("0x%x-0x%x", start, end),
 			HexDump:   hexStr,
 			ASCIISafe: toASCIISafe(data),
 			Entropy:   calcEntropy(data),
