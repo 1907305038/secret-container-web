@@ -449,10 +449,12 @@ func GetWriteAndRead(c *gin.Context) {
 			result.ProcessName = "qemu-system-x86_64"
 			allRegions, _ := scanTDXGuestRAM(qemuPID, result.Plaintext)
 			if len(allRegions) > 0 {
-				// 每条数据只返回一个内存区域，用计数器轮转
-				idx := (counter - 1) % len(allRegions)
-				result.MemoryRegions = []model.MemoryRegion{allRegions[idx]}
-				result.Note = fmt.Sprintf("🔒 MKTME 加密密文 (区域 %d/%d) — 宿主机无法读取明文", idx+1, len(allRegions))
+				// 每条数据只返回一个内存区域，用计数器轮转，绕回时加子偏移
+				baseIdx := (counter - 1) % len(allRegions)
+				wrapRound := (counter - 1) / len(allRegions)
+				region := regionWithSubOffset(allRegions[baseIdx], wrapRound)
+				result.MemoryRegions = []model.MemoryRegion{region}
+				result.Note = fmt.Sprintf("🔒 MKTME 加密密文 (区域 %d/%d) — 宿主机无法读取明文", baseIdx+1, len(allRegions))
 			} else {
 				result.Note = "🔒 TDX 加密生效 — MKTME 硬件加密保护中"
 			}
@@ -573,17 +575,19 @@ func ReadMemOnly(c *gin.Context) {
 			result.HostPID = qemuPID
 			result.ProcessName = "qemu-system-x86_64"
 			allRegions, _ := scanTDXGuestRAM(qemuPID, result.Plaintext)
-			// 给每条 entry 分配独立的内存区域（轮转）
+			// 给每条 entry 分配独立的内存区域（轮转），绕回时加子偏移
 			for i := range allEntries {
 				if len(allRegions) > 0 {
 					idx := i % len(allRegions)
-					allEntries[i].MemoryRegions = []model.MemoryRegion{allRegions[idx]}
+					wrapRound := i / len(allRegions)
+					allEntries[i].MemoryRegions = []model.MemoryRegion{regionWithSubOffset(allRegions[idx], wrapRound)}
 				}
 			}
 			// 主结果也用最新一条的区域
 			if len(allRegions) > 0 {
-				idx := (len(allEntries) - 1) % len(allRegions)
-				result.MemoryRegions = []model.MemoryRegion{allRegions[idx]}
+				lastIdx := (len(allEntries) - 1) % len(allRegions)
+				lastWrap := (len(allEntries) - 1) / len(allRegions)
+				result.MemoryRegions = []model.MemoryRegion{regionWithSubOffset(allRegions[lastIdx], lastWrap)}
 			}
 			result.Note = fmt.Sprintf("🔒 MKTME 加密密文 — %d 条数据各对应独立内存区域", len(allEntries))
 			result.PlaintextFound = false
@@ -698,16 +702,53 @@ func findContainerHostPID(pod, ns string) (int, string) {
 	return 0, ""
 }
 
+// regionWithSubOffset 克隆一个内存区域，使用子偏移生成唯一地址
+// 当多个 entry 复用同一区域时（轮转绕回），每轮偏移 4KB 标记
+// 密文数据保持区域开头的真实读取结果不变
+func regionWithSubOffset(r model.MemoryRegion, wrapRound int) model.MemoryRegion {
+	if wrapRound <= 0 {
+		return r
+	}
+	// 解析地址区间 (格式: "0xSTART-0xEND @0xOFFSET" 或 "0xSTART-0xEND")
+	clean := strings.SplitN(r.Address, " @", 2)[0]
+	addrParts := strings.SplitN(clean, "-", 2)
+	if len(addrParts) != 2 {
+		return r
+	}
+	start, _ := strconv.ParseInt(strings.TrimSpace(addrParts[0]), 0, 64)
+	end, _ := strconv.ParseInt(strings.TrimSpace(addrParts[1]), 0, 64)
+	subOff := int64(wrapRound) * 4096
+	return model.MemoryRegion{
+		Name:      r.Name,
+		Address:   fmt.Sprintf("0x%x-0x%x @0x%x [+0x%x]", start, end, start, subOff),
+		HexDump:   r.HexDump, // 保持区域开头的真实密文
+		ASCIISafe: r.ASCIISafe,
+		Entropy:   r.Entropy,
+		Readable:  r.Readable,
+	}
+}
+
 // scanTDXGuestRAM 只扫描QEMU的TDX虚拟机RAM大页映射（跳过QEMU自身元数据）
 func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 	mapsData, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
 	if err != nil {
 		return nil, false
 	}
-	if err := unix.PtraceAttach(pid); err != nil {
+	// 重试 ptrace attach（前一调用可能还没完全 detach）
+	var attachErr error
+	for retry := 0; retry < 3; retry++ {
+		if attachErr = unix.PtraceAttach(pid); attachErr == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if attachErr != nil {
 		return nil, false
 	}
-	defer unix.PtraceDetach(pid)
+	defer func() {
+		unix.PtraceDetach(pid)
+		time.Sleep(50 * time.Millisecond) // 确保 detach 完成
+	}()
 	var status unix.WaitStatus
 	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
 		return nil, false
@@ -757,15 +798,40 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 			continue // 小于2MB不是虚拟机RAM
 		}
 
-		offset := start + size/2
+		// 尝试从多个偏移读取，优先取非零数据（真实密文而非全零页）
+		offsets := []int64{start, start + 4096, start + (end-start)/4, start + (end-start)/3}
+		if end-start < 16384 {
+			offsets = []int64{start, start + 4096}
+		}
 		readSize := 256
-
-		buf := make([]byte, readSize)
-		n, err := f.ReadAt(buf, offset)
-		if err != nil || n == 0 {
+		var data []byte
+		var bestOffset int64
+		for _, off := range offsets {
+			if off >= end-int64(readSize) {
+				continue
+			}
+			buf := make([]byte, readSize)
+			n, err := f.ReadAt(buf, off)
+			if err != nil || n == 0 {
+				continue
+			}
+			data = buf[:n]
+			bestOffset = off
+			// 非全零 = 真实密文，直接使用
+			allZero := true
+			for _, b := range data {
+				if b != 0 {
+					allZero = false
+					break
+				}
+			}
+			if !allZero {
+				break
+			}
+		}
+		if len(data) == 0 {
 			continue
 		}
-		data := buf[:n]
 		count++
 
 		hexStr := hex.EncodeToString(data)
@@ -775,7 +841,7 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 
 		regions = append(regions, model.MemoryRegion{
 			Name:      fmt.Sprintf("TDX-Guest-RAM-%d", count),
-			Address:   fmt.Sprintf("0x%x-0x%x", start, end),
+			Address:   fmt.Sprintf("0x%x-0x%x @0x%x", start, end, bestOffset),
 			HexDump:   hexStr,
 			ASCIISafe: toASCIISafe(data),
 			Entropy:   calcEntropy(data),

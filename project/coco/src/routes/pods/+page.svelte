@@ -675,7 +675,7 @@
 							{@const addr = addrMatch ? parseInt(addrMatch[1], 16) : 0}
 							<div class="write-region">
 								<div class="wr-addr">{region.address}</div>
-								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" baseAddr={addr} addrLabel="内存地址" entropyLabel="MKTME加密密文(全零)" />
+								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" baseAddr={addr} addrLabel="内存地址" entropyLabel={region.entropy > 0 ? "MKTME 加密密文(非零)" : "MKTME 加密密文(全零)"} />
 							</div>
 						{/each}
 					{/if}
