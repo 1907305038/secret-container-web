@@ -405,7 +405,7 @@ func GetWriteAndRead(c *gin.Context) {
 		fmt.Sscanf(strings.TrimSpace(cntStr), "%d", &counter)
 	}
 	fileName := fmt.Sprintf("/dev/shm/proof_%d.txt", counter)
-	writeCmd := fmt.Sprintf("echo '%s' > %s && echo '%d' > /dev/shm/.proof_count && cat %s",
+	writeCmd := fmt.Sprintf("printf '%%s' '%s' > %s && echo '%d' > /dev/shm/.proof_count && cat %s",
 		result.Plaintext, fileName, counter+1, fileName)
 	out, err := execPodCmd(req.Pod, req.Ns, writeCmd)
 	if err != nil {
