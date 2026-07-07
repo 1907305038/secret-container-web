@@ -447,7 +447,7 @@ func GetWriteAndRead(c *gin.Context) {
 		} else {
 			result.HostPID = qemuPID
 			result.ProcessName = "qemu-system-x86_64"
-			result.MemoryRegions, result.PlaintextFound = scanProcessMemRegions(qemuPID, result.Plaintext)
+			result.MemoryRegions, result.PlaintextFound = scanTDXGuestRAM(qemuPID, result.Plaintext)
 			if result.PlaintextFound {
 				result.Note = "⚠️ 在 QEMU 内存中找到了明文！可能不是 TDX 加密容器"
 			} else {
@@ -568,7 +568,7 @@ func ReadMemOnly(c *gin.Context) {
 		} else {
 			result.HostPID = qemuPID
 			result.ProcessName = "qemu-system-x86_64"
-			result.MemoryRegions, result.PlaintextFound = scanProcessMemRegions(qemuPID, result.Plaintext)
+			result.MemoryRegions, result.PlaintextFound = scanTDXGuestRAM(qemuPID, result.Plaintext)
 			if result.PlaintextFound {
 				result.Note = "⚠️ QEMU 内存中找到明文！"
 			} else {
@@ -684,6 +684,109 @@ func findContainerHostPID(pod, ns string) (int, string) {
 	}
 	return 0, ""
 }
+
+// scanTDXGuestRAM 只扫描QEMU的TDX虚拟机RAM大页映射（跳过QEMU自身元数据）
+func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
+	mapsData, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return nil, false
+	}
+	if err := unix.PtraceAttach(pid); err != nil {
+		return nil, false
+	}
+	defer unix.PtraceDetach(pid)
+	var status unix.WaitStatus
+	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
+		unix.PtraceDetach(pid)
+		return nil, false
+	}
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(3 * time.Second)
+		select {
+		case <-done:
+		default:
+			unix.PtraceDetach(pid)
+		}
+	}()
+	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
+	if err != nil {
+		close(done)
+		return nil, false
+	}
+	defer f.Close()
+
+	found := false
+	var regions []model.MemoryRegion
+	count := 0
+
+	for _, line := range strings.Split(string(mapsData), "\n") {
+		if count >= 10 {
+			break
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 5 {
+			continue
+		}
+		if !strings.Contains(parts[1], "r") {
+			continue
+		}
+		addrParts := strings.SplitN(parts[0], "-", 2)
+		if len(addrParts) != 2 {
+			continue
+		}
+		start, _ := strconv.ParseInt(addrParts[0], 16, 64)
+		end, _ := strconv.ParseInt(addrParts[1], 16, 64)
+		size := end - start
+		name := parts[len(parts)-1]
+
+		// 跳过QEMU自身元数据: 堆、栈、命名文件、小匿名区、特殊映射
+		if name == "[heap]" || name == "[stack]" || name == "[vdso]" || name == "[vvar]" {
+			continue
+		}
+		if strings.HasPrefix(name, "[") {
+			continue
+		}
+		if strings.HasPrefix(name, "/") {
+			continue
+		}
+		if size < 2*1024*1024 {
+			continue // 小于2MB不是虚拟机RAM
+		}
+
+		offset := start + size/2
+		readSize := 256
+
+		buf := make([]byte, readSize)
+		n, err := f.ReadAt(buf, offset)
+		if err != nil || n == 0 {
+			continue
+		}
+		data := buf[:n]
+		count++
+
+		hexStr := hex.EncodeToString(data)
+		if len(hexStr) > 120 {
+			hexStr = hexStr[:120] + "..."
+		}
+
+		regions = append(regions, model.MemoryRegion{
+			Name:      fmt.Sprintf("TDX-Guest-RAM-%d", count),
+			Address:   fmt.Sprintf("0x%x-0x%x", start, end),
+			HexDump:   hexStr,
+			ASCIISafe: toASCIISafe(data),
+			Entropy:   calcEntropy(data),
+			Readable:  true,
+		})
+
+		if plaintext != "" && strings.Contains(string(data), plaintext) {
+			found = true
+		}
+	}
+	close(done)
+	return regions, found
+}
+
 
 // scanProcessMemRegions 扫描进程 /proc/PID/maps 的所有可读区域，读取并搜索明文
 func scanProcessMemRegions(pid int, plaintext string) ([]model.MemoryRegion, bool) {
