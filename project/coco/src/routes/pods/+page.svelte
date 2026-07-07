@@ -128,6 +128,13 @@
 			body: JSON.stringify({ pod: name, ns, data: customData[key] || '' })
 		});
 		const d = await r.json();
+		// 如果写入失败（如 error 字段存在），不追加
+		if (d.error) {
+			msg = `❌ ${d.error}`;
+			writeLoading[key] = false;
+			writeLoading = { ...writeLoading };
+			return;
+		}
 		// 追加到数组，不覆盖
 		writeResults[key] = [...(writeResults[key] || []), d];
 		writeResults = { ...writeResults };
@@ -146,6 +153,13 @@
 		});
 		const d = await r.json();
 		const arr = writeResults[key] || [];
+		// 如果是空数据（容器内无内容），不追加到列表
+		if (!d.plaintext || d.note?.includes('无数据')) {
+			msg = d.note || '容器内无数据，请先写入';
+			writeLoading[key] = false;
+			writeLoading = { ...writeLoading };
+			return;
+		}
 		// 去重：如果最新一条数据相同，不追加
 		const last = arr[arr.length - 1];
 		if (!last || last.plaintext !== d.plaintext || last.plaintext_found !== d.plaintext_found) {
