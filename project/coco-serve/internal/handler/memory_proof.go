@@ -473,15 +473,21 @@ func GetWriteAndRead(c *gin.Context) {
 			dataFromHost, err := os.ReadFile(hostPath)
 			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
 				result.PlaintextFound = true
-				result.Note = fmt.Sprintf("⚠️ 宿主机可直接读取容器文件！PID=%d 路径=%s 明文=%s", hostPID, hostPath, strings.TrimSpace(string(dataFromHost)))
+				// 只返回这一条数据——文件内容本身即内存中的数据
+				result.MemoryRegions = []model.MemoryRegion{{
+					Name:      hostPath,
+					Address:   hostPath,
+					HexDump:   hex.EncodeToString(dataFromHost),
+					ASCIISafe: toASCIISafe(dataFromHost),
+					Entropy:   calcEntropy(dataFromHost),
+					Readable:  true,
+				}}
+				result.Note = fmt.Sprintf("⚠️ 宿主机可直接读取 (PID=%d)", hostPID)
 			} else if err != nil {
 				result.Note = fmt.Sprintf("宿主机读取失败: %v (PID=%d)", err, hostPID)
 			} else {
 				result.Note = fmt.Sprintf("宿主机文件内容不匹配 (PID=%d)", hostPID)
 			}
-
-			// 同时读取进程内存区域（展示实际内存数据 + 地址）
-			result.MemoryRegions, _ = scanProcessMemRegions(hostPID, "")
 		}
 	}
 
@@ -603,11 +609,19 @@ func ReadMemOnly(c *gin.Context) {
 			dataFromHost, err := os.ReadFile(hostPath)
 			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
 				result.PlaintextFound = true
-				result.Note = fmt.Sprintf("⚠️ 宿主机读到: %s", strings.TrimSpace(string(dataFromHost)))
+				// 只返回文件数据本身
+				result.MemoryRegions = []model.MemoryRegion{{
+					Name:      hostPath,
+					Address:   hostPath,
+					HexDump:   hex.EncodeToString(dataFromHost),
+					ASCIISafe: toASCIISafe(dataFromHost),
+					Entropy:   calcEntropy(dataFromHost),
+					Readable:  true,
+				}}
+				result.Note = fmt.Sprintf("⚠️ 宿主机可直接读取 (PID=%d)", hostPID)
 			} else {
 				result.Note = "宿主机读取失败"
 			}
-			result.MemoryRegions, _ = scanProcessMemRegions(hostPID, "")
 		}
 	}
 
