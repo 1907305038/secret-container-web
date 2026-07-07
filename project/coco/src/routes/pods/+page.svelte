@@ -685,8 +685,21 @@
 					{@const bytes = new TextEncoder().encode(modalWR.plaintext)}
 					{@const hexStr = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}
 					{@const asciiStr = Array.from(bytes).map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('')}
-					<div class="mem-modal-info">长度: {bytes.length} bytes | 文件: {modalWR.file_name || 'N/A'}</div>
-					<HexDump hexData={hexStr} asciiSafe={asciiStr} label={modalWR.file_name || '/dev/shm/proof_N.txt'} variant="plain" addrLabel="文件偏移" />
+					<div class="mem-modal-info">明文: <code>{modalWR.plaintext}</code> | 长度: {bytes.length} bytes | 文件: {modalWR.file_name || 'N/A'}</div>
+					<div class="mem-modal-info">⚠️ 宿主机可直接读取容器内存 — 普通容器无硬件加密保护</div>
+					{#if modalWR?.memory_regions?.length}
+						<div class="mem-modal-info" style="margin-top:6px">📊 宿主机进程内存区域 (PID: {modalWR.host_pid}):</div>
+						{#each modalWR.memory_regions.slice(0, 4) as region}
+							{@const addrMatch = region.address?.match(/(0x[0-9a-f]+)/i)}
+							{@const addr = addrMatch ? parseInt(addrMatch[1], 16) : 0}
+							<div class="write-region">
+								<div class="wr-addr">{region.address}</div>
+								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="plain" baseAddr={addr} addrLabel="内存地址" />
+							</div>
+						{/each}
+					{:else}
+						<HexDump hexData={hexStr} asciiSafe={asciiStr} label={modalWR.file_name || '/dev/shm/proof_N.txt'} variant="plain" addrLabel="文件偏移" />
+					{/if}
 				{:else}
 					<div class="mem-modal-empty">暂无数据</div>
 				{/if}
