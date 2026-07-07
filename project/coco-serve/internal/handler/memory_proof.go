@@ -581,21 +581,57 @@ func scanProcessMemRegions(pid int, plaintext string) ([]model.MemoryRegion, boo
 			continue
 		}
 
+		// 尝试从多个偏移读取，跳过零填充页
+		offsets := []int64{start, start + 4096, start + (end-start)/2}
+		if end-start < 8192 {
+			offsets = []int64{start, start + (end-start)/2}
+		}
+
+		var bestData []byte
+		var bestOff int64
 		readSize := 256
 		if int(end-start) < readSize {
 			readSize = int(end - start)
 		}
 
-		buf := make([]byte, readSize)
-		n, err := f.ReadAt(buf, start)
-		if err != nil && n == 0 {
+		for _, off := range offsets {
+			if off >= end-int64(readSize) {
+				off = end - int64(readSize) - 1
+			}
+			if off < start {
+				off = start
+			}
+			buf := make([]byte, readSize)
+			n, err := f.ReadAt(buf, off)
+			if err != nil || n == 0 {
+				continue
+			}
+			// 检查是否全零
+			allZero := true
+			for _, b := range buf[:n] {
+				if b != 0 {
+					allZero = false
+					break
+				}
+			}
+			if !allZero {
+				bestData = buf[:n]
+				bestOff = off
+				break
+			}
+			// 保存最后一次读取作为 fallback
+			bestData = buf[:n]
+			bestOff = off
+		}
+
+		if len(bestData) == 0 {
 			continue
 		}
-		data := buf[:n]
+		data := bestData
 		count++
 
 		regionName := parts[len(parts)-1]
-		if regionName == "" || strings.HasPrefix(regionName, "[") {
+		if regionName == "" || regionName == "0" {
 			regionName = fmt.Sprintf("anon-%d", count)
 		}
 
@@ -606,7 +642,7 @@ func scanProcessMemRegions(pid int, plaintext string) ([]model.MemoryRegion, boo
 
 		regions = append(regions, model.MemoryRegion{
 			Name:      regionName,
-			Address:   fmt.Sprintf("0x%x-0x%x", start, end),
+			Address:   fmt.Sprintf("0x%x-0x%x (偏移 0x%x)", start, end, bestOff),
 			HexDump:   hexStr,
 			ASCIISafe: toASCIISafe(data),
 			Entropy:   calcEntropy(data),
