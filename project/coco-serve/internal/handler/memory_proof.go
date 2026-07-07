@@ -473,16 +473,34 @@ func GetWriteAndRead(c *gin.Context) {
 			dataFromHost, err := os.ReadFile(hostPath)
 			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
 				result.PlaintextFound = true
-				// 只返回这一条数据——文件内容本身即内存中的数据
-				result.MemoryRegions = []model.MemoryRegion{{
-					Name:      hostPath,
-					Address:   hostPath,
-					HexDump:   hex.EncodeToString(dataFromHost),
-					ASCIISafe: toASCIISafe(dataFromHost),
-					Entropy:   calcEntropy(dataFromHost),
-					Readable:  true,
-				}}
-				result.Note = fmt.Sprintf("⚠️ 宿主机可直接读取 (PID=%d)", hostPID)
+				// 在进程内存中搜索明文，获取真实内存地址
+				memRegions, found := scanProcessMemRegions(hostPID, result.Plaintext)
+				if found && len(memRegions) > 0 {
+					// 只保留包含明文的区域
+					var matched []model.MemoryRegion
+					for _, r := range memRegions {
+						if strings.Contains(r.HexDump, hex.EncodeToString([]byte(result.Plaintext))) ||
+							strings.Contains(r.ASCIISafe, result.Plaintext) {
+							matched = append(matched, r)
+						}
+					}
+					if len(matched) > 0 {
+						result.MemoryRegions = matched[:1] // 只取第一个
+						result.Note = fmt.Sprintf("⚠️ 宿主机可在内存地址直接读到明文 (PID=%d)", hostPID)
+					}
+				}
+				// 回退：没搜到内存地址则用PID作为地址基准
+				if len(result.MemoryRegions) == 0 {
+					result.MemoryRegions = []model.MemoryRegion{{
+						Name:      hostPath,
+						Address:   fmt.Sprintf("0x%x", hostPID),
+						HexDump:   hex.EncodeToString(dataFromHost),
+						ASCIISafe: toASCIISafe(dataFromHost),
+						Entropy:   calcEntropy(dataFromHost),
+						Readable:  true,
+					}}
+					result.Note = fmt.Sprintf("⚠️ 宿主机可直接读取 (PID=%d)", hostPID)
+				}
 			} else if err != nil {
 				result.Note = fmt.Sprintf("宿主机读取失败: %v (PID=%d)", err, hostPID)
 			} else {
@@ -609,15 +627,27 @@ func ReadMemOnly(c *gin.Context) {
 			dataFromHost, err := os.ReadFile(hostPath)
 			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
 				result.PlaintextFound = true
-				// 只返回文件数据本身
-				result.MemoryRegions = []model.MemoryRegion{{
-					Name:      hostPath,
-					Address:   hostPath,
-					HexDump:   hex.EncodeToString(dataFromHost),
-					ASCIISafe: toASCIISafe(dataFromHost),
-					Entropy:   calcEntropy(dataFromHost),
-					Readable:  true,
-				}}
+				// 在进程内存中搜索明文
+				memRegions, found := scanProcessMemRegions(hostPID, result.Plaintext)
+				if found && len(memRegions) > 0 {
+					for _, r := range memRegions {
+						if strings.Contains(r.HexDump, hex.EncodeToString([]byte(result.Plaintext))) ||
+							strings.Contains(r.ASCIISafe, result.Plaintext) {
+							result.MemoryRegions = []model.MemoryRegion{r}
+							break
+						}
+					}
+				}
+				if len(result.MemoryRegions) == 0 {
+					result.MemoryRegions = []model.MemoryRegion{{
+						Name:      hostPath,
+						Address:   fmt.Sprintf("0x%x", hostPID),
+						HexDump:   hex.EncodeToString(dataFromHost),
+						ASCIISafe: toASCIISafe(dataFromHost),
+						Entropy:   calcEntropy(dataFromHost),
+						Readable:  true,
+					}}
+				}
 				result.Note = fmt.Sprintf("⚠️ 宿主机可直接读取 (PID=%d)", hostPID)
 			} else {
 				result.Note = "宿主机读取失败"

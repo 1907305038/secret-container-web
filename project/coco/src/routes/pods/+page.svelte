@@ -687,9 +687,12 @@
 					<div class="mem-modal-info" style="color:#ef4444">⚠️ 普通容器 — 宿主机可直接读取内存</div>
 					{#if modalWR?.memory_regions?.length}
 						{@const region = modalWR.memory_regions[0]}
+						{@const isMemAddr = /^0x[0-9a-f]+/.test(region.address || '')}
+						{@const addrMatch = region.address?.match(/(0x[0-9a-f]+)/i)}
+						{@const addr = (isMemAddr && addrMatch) ? parseInt(addrMatch[1], 16) : 0}
 						<div class="write-region">
-							<div class="wr-addr" style="word-break:break-all;font-size:0.7rem;color:#94a3b8">{region.name}</div>
-							<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label="宿主机直接读取" entropy={region.entropy} variant="plain" addrLabel="文件偏移" />
+							<div class="wr-addr">{region.name}</div>
+							<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={isMemAddr ? region.name : '宿主机直接读取'} entropy={region.entropy} variant="plain" baseAddr={addr} addrLabel="内存地址" />
 						</div>
 					{:else}
 						{@const hexStr = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}
