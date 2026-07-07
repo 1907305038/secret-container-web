@@ -33,6 +33,11 @@
 		<div class="hex-label">{label}</div>
 	{/if}
 	<div class="hex-body">
+		<div class="hex-row hex-header">
+			<span class="hex-offset">内存地址</span>
+			<span class="hex-values">16进制数据</span>
+			<span class="hex-ascii">ASCII</span>
+		</div>
 		{#each rows as row, idx}
 			<div class="hex-row">
 				<span class="hex-offset">{(idx * 16).toString(16).padStart(8, '0')}</span>
@@ -85,6 +90,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1px;
+	}
+	.hex-header {
+		color: #64748b; font-size: 0.65rem; font-weight: 600;
+		border-bottom: 1px solid #334155; padding-bottom: 4px; margin-bottom: 2px;
 	}
 	.hex-row {
 		display: flex;
