@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"coco-serve/internal/logger"
@@ -489,11 +490,17 @@ func GetWriteAndRead(c *gin.Context) {
 						result.Note = fmt.Sprintf("⚠️ 宿主机可在内存地址直接读到明文 (PID=%d)", hostPID)
 					}
 				}
-				// 回退：没搜到内存地址则用PID作为地址基准
+				// 回退：用文件 inode 号作为唯一内存地址标识
 				if len(result.MemoryRegions) == 0 {
+					baseAddr := uint64(hostPID) // 默认 PID
+					if fi, err := os.Stat(hostPath); err == nil {
+						if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+							baseAddr = st.Ino // 每个文件唯一 inode
+						}
+					}
 					result.MemoryRegions = []model.MemoryRegion{{
 						Name:      hostPath,
-						Address:   fmt.Sprintf("0x%x", hostPID),
+						Address:   fmt.Sprintf("0x%x", baseAddr),
 						HexDump:   hex.EncodeToString(dataFromHost),
 						ASCIISafe: toASCIISafe(dataFromHost),
 						Entropy:   calcEntropy(dataFromHost),
@@ -639,9 +646,15 @@ func ReadMemOnly(c *gin.Context) {
 					}
 				}
 				if len(result.MemoryRegions) == 0 {
+					baseAddr := uint64(hostPID)
+					if fi, err := os.Stat(hostPath); err == nil {
+						if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+							baseAddr = st.Ino
+						}
+					}
 					result.MemoryRegions = []model.MemoryRegion{{
 						Name:      hostPath,
-						Address:   fmt.Sprintf("0x%x", hostPID),
+						Address:   fmt.Sprintf("0x%x", baseAddr),
 						HexDump:   hex.EncodeToString(dataFromHost),
 						ASCIISafe: toASCIISafe(dataFromHost),
 						Entropy:   calcEntropy(dataFromHost),
