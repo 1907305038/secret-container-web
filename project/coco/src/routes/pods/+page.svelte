@@ -668,7 +668,7 @@
 							{@const addr = addrMatch ? parseInt(addrMatch[1], 16) : 0}
 							<div class="write-region">
 								<div class="wr-addr">{region.address}</div>
-								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" baseAddr={addr} addrLabel="内存地址" />
+								<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant="cipher" baseAddr={addr} addrLabel="内存地址" entropyLabel="QEMU元数据(非TDX加密区)" />
 							</div>
 						{/each}
 					{/if}

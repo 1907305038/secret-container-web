@@ -8,9 +8,10 @@
 		note?: string;
 		baseAddr?: number;
 		addrLabel?: string;      // 地址列标题
+		entropyLabel?: string;    // 自定义熵值标签
 	}
 
-	let { hexData, asciiSafe = '', label = '', entropy = 0, variant = 'unknown', note = '', baseAddr = 0, addrLabel = '内存地址' }: Props = $props();
+	let { hexData, asciiSafe = '', label = '', entropy = 0, variant = 'unknown', note = '', baseAddr = 0, addrLabel = '内存地址', entropyLabel = '' }: Props = $props();
 
 	// 每 32 个 hex 字符 (16 字节) 一行
 	let rows: { hex: string; ascii: string }[] = $derived.by(() => {
@@ -54,7 +55,7 @@
 			<span class="entropy-bar">
 				<span class="entropy-fill" style="width: {Math.min(entropy / 8 * 100, 100)}%"></span>
 			</span>
-			<span class="entropy-label">{entropy > 6.5 ? '🔴 高熵(密文特征)' : entropy > 4 ? '🟡 中等' : '🟢 低熵(明文特征)'}</span>
+			<span class="entropy-label">{entropyLabel || (entropy > 6.5 ? '🔴 高熵(密文特征)' : entropy > 4 ? '🟡 中等' : '🟢 低熵(明文特征)')}</span>
 		</div>
 	{/if}
 	{#if note}
