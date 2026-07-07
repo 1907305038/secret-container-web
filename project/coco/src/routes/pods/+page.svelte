@@ -473,9 +473,11 @@
 									{#if showMemRegions[regKey]}
 										<div class="write-regions" in:fade={{ duration: 150 }}>
 											{#each wr.memory_regions.slice(0, 4) as region}
+												{@const addrMatch = region.address?.match(/(0x[0-9a-f]+)/i)}
+												{@const addr = addrMatch ? parseInt(addrMatch[1], 16) : 0}
 												<div class="write-region">
 													<div class="wr-addr">{region.address}</div>
-													<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={wr.plaintext_found ? 'plain' : 'cipher'} />
+													<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={wr.plaintext_found ? 'plain' : 'cipher'} baseAddr={addr} addrLabel="内存地址" entropyLabel={region.entropy > 0 ? "MKTME 加密密文(非零)" : "MKTME 加密密文(全零)"} />
 												</div>
 											{/each}
 										</div>
