@@ -654,16 +654,14 @@
 				<button class="mem-modal-close" onclick={closeMemModal}>✕</button>
 			</div>
 			<div class="mem-modal-body">
-				{#if modalWR?.memory_regions?.length}
-					<div class="write-regions-title">PID: {modalWR.host_pid} — {modalWR.memory_regions.length} 个区域</div>
-					{#each modalWR.memory_regions as region}
-						<div class="write-region">
-							<div class="wr-addr">{region.address}</div>
-							<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={modalWR.plaintext_found ? 'plain' : 'cipher'} />
-						</div>
-					{/each}
+				{#if modalWR?.plaintext}
+					{@const bytes = new TextEncoder().encode(modalWR.plaintext)}
+					{@const hexStr = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}
+					{@const asciiStr = Array.from(bytes).map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('')}
+					<div class="mem-modal-info">长度: {bytes.length} bytes | 文件: {modalWR.file_name || 'N/A'}</div>
+					<HexDump hexData={hexStr} asciiSafe={asciiStr} label="数据内容" variant="plain" />
 				{:else}
-					<div class="mem-modal-empty">暂无内存数据</div>
+					<div class="mem-modal-empty">暂无数据</div>
 				{/if}
 			</div>
 		</div>
