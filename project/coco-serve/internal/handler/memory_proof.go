@@ -584,6 +584,42 @@ func ReadMemOnly(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// DeleteProof 删除容器内指定编号的 proof 文件
+// POST /api/demo/delete-proof  body: {"pod":"name","ns":"namespace","idx":1}
+func DeleteProof(c *gin.Context) {
+	var req struct {
+		Pod string `json:"pod" binding:"required"`
+		Ns  string `json:"ns"`
+		Idx int    `json:"idx"` // 对应 proof_N.txt 中的 N
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Ns == "" {
+		req.Ns = "default"
+	}
+	if req.Idx < 1 {
+		req.Idx = 1
+	}
+
+	fileName := fmt.Sprintf("/dev/shm/proof_%d.txt", req.Idx)
+	rmCmd := fmt.Sprintf("rm -f %s && ls /dev/shm/proof_*.txt 2>/dev/null | wc -l", fileName)
+	out, err := execPodCmd(req.Pod, req.Ns, rmCmd)
+	remaining := 0
+	if err == nil {
+		remaining, _ = strconv.Atoi(strings.TrimSpace(out))
+	}
+
+	logger.Memory.Info("proof deleted",
+		zap.String("pod", req.Ns+"/"+req.Pod),
+		zap.Int("idx", req.Idx),
+		zap.Int("remaining", remaining),
+	)
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "idx": req.Idx, "remaining": remaining})
+}
+
 // findContainerHostPID 找到普通容器进程在宿主机上的 PID（通过 Pod UID 匹配 cgroup）
 func findContainerHostPID(pod, ns string) (int, string) {
 	// 获取 Pod UID

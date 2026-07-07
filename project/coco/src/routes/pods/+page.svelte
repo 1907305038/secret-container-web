@@ -156,6 +156,26 @@
 		writeLoading = { ...writeLoading };
 	}
 
+	// 查看内存数据弹窗
+	let memModal = $state<{ podKey: string; idx: number } | null>(null);
+
+	function openMemModal(podKey: string, idx: number) { memModal = { podKey, idx }; }
+	function closeMemModal() { memModal = null; }
+
+	// 删除某条写入数据
+	async function deleteProof(ns: string, name: string, idx: number) {
+		const key = `${ns}/${name}`;
+		await fetch('/api/demo/delete-proof', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ pod: name, ns, idx: idx + 1 }) // idx+1 = proof_N 的 N
+		});
+		const arr = (writeResults[key] || []).filter((_, i) => i !== idx);
+		writeResults[key] = arr;
+		writeResults = { ...writeResults };
+		if (memModal?.podKey === key && memModal.idx >= arr.length) closeMemModal();
+	}
+
 	async function readMem(pid: number, ns?: string, pod?: string) {
 		const key = String(pid);
 		if (memResults[key]) { memResults[key] = null; memResults = { ...memResults }; return; }
@@ -409,6 +429,12 @@
 									<span class="write-badge {wr.plaintext_found ? 'found' : 'safe'}">
 										{wr.plaintext_found ? '⚠️ 宿主机可读' : '✅ 加密保护'}
 									</span>
+									<div class="write-row-actions">
+										{#if wr.memory_regions?.length}
+											<button class="wr-act view" onclick={(e) => { e.stopPropagation(); openMemModal(key, idx); }}>📄 查看内存</button>
+										{/if}
+										<button class="wr-act del" onclick={(e) => { e.stopPropagation(); deleteProof(pod.namespace, pod.name, idx); }}>🗑️</button>
+									</div>
 								</div>
 								<div class="write-note">{wr.note}</div>
 								{#if isLast && wr.memory_regions?.length}
@@ -597,6 +623,34 @@
 
 {#if loading}
 	<div class="loading">加载中...</div>
+{/if}
+
+<!-- 内存数据弹窗 -->
+{#if memModal}
+	{@const modalKey = memModal.podKey}
+	{@const modalIdx = memModal.idx}
+	{@const modalWR = writeResults[modalKey]?.[modalIdx]}
+	<div class="mem-modal-overlay" onclick={closeMemModal} in:fade={{ duration: 150 }}>
+		<div class="mem-modal" onclick={(e) => e.stopPropagation()} in:fly={{ y: 20, duration: 250 }}>
+			<div class="mem-modal-header">
+				<span>📄 内存数据 — {modalWR?.plaintext || ''}</span>
+				<button class="mem-modal-close" onclick={closeMemModal}>✕</button>
+			</div>
+			<div class="mem-modal-body">
+				{#if modalWR?.memory_regions?.length}
+					<div class="write-regions-title">PID: {modalWR.host_pid} — {modalWR.memory_regions.length} 个区域</div>
+					{#each modalWR.memory_regions as region}
+						<div class="write-region">
+							<div class="wr-addr">{region.address}</div>
+							<HexDump hexData={region.hex_dump || ''} asciiSafe={region.ascii_safe || ''} label={region.name} entropy={region.entropy} variant={modalWR.plaintext_found ? 'plain' : 'cipher'} />
+						</div>
+					{/each}
+				{:else}
+					<div class="mem-modal-empty">暂无内存数据</div>
+				{/if}
+			</div>
+		</div>
+	</div>
 {/if}
 
 <style>
@@ -911,6 +965,38 @@
 		border-radius: 4px; padding: 3px 8px; cursor: pointer; margin-top: 4px; transition: all 0.15s;
 	}
 	.mem-toggle:hover { background: #e2e8f0; border-color: #94a3b8; }
+
+	/* 行内操作按钮 */
+	.write-row-actions { display: flex; gap: 4px; margin-left: auto; }
+	.wr-act {
+		font-size: 0.65rem; padding: 2px 6px; border: 1px solid #e2e8f0;
+		border-radius: 4px; background: #fff; cursor: pointer; transition: all 0.15s;
+	}
+	.wr-act.view:hover { background: #eff6ff; border-color: #3b82f6; color: #2563eb; }
+	.wr-act.del:hover { background: #fee2e2; border-color: #ef4444; color: #dc2626; }
+
+	/* 内存数据弹窗 */
+	.mem-modal-overlay {
+		position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200;
+		display: flex; align-items: center; justify-content: center;
+		backdrop-filter: blur(4px);
+	}
+	.mem-modal {
+		background: #fff; border-radius: 12px; width: 90vw; max-width: 700px;
+		max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+	}
+	.mem-modal-header {
+		display: flex; justify-content: space-between; align-items: center;
+		padding: 12px 16px; border-bottom: 1px solid #e2e8f0;
+		font-size: 0.85rem; font-weight: 600; color: #1e293b;
+	}
+	.mem-modal-close {
+		background: none; border: none; font-size: 1.1rem; cursor: pointer;
+		color: #94a3b8; border-radius: 4px; padding: 2px 6px;
+	}
+	.mem-modal-close:hover { background: #fee2e2; color: #ef4444; }
+	.mem-modal-body { padding: 12px 16px; }
+	.mem-modal-empty { text-align: center; color: #94a3b8; padding: 2rem; }
 
 	.loading { text-align: center; padding: 2rem; color: #94a3b8; animation: pulse 1.5s infinite; }
 </style>
