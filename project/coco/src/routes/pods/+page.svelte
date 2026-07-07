@@ -114,12 +114,29 @@
 	// 写入数据 + 读取内存对比
 	let writeResults = $state<Record<string, WriteAndReadResult>>({});
 	let writeLoading = $state<Record<string, boolean>>({});
+	let customData = $state<Record<string, string>>({});
 
 	async function writeAndRead(ns: string, name: string) {
 		const key = `${ns}/${name}`;
 		writeLoading[key] = true;
 		writeLoading = { ...writeLoading };
 		const r = await fetch('/api/demo/write-and-read', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ pod: name, ns, data: customData[key] || '' })
+		});
+		const d = await r.json();
+		writeResults[key] = d;
+		writeResults = { ...writeResults };
+		writeLoading[key] = false;
+		writeLoading = { ...writeLoading };
+	}
+
+	async function readMemOnly(ns: string, name: string) {
+		const key = `${ns}/${name}`;
+		writeLoading[key] = true;
+		writeLoading = { ...writeLoading };
+		const r = await fetch('/api/demo/read-mem', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ pod: name, ns })
@@ -522,11 +539,24 @@
 					<div class="write-result" in:fade={{ delay: 100 }}>
 						<div class="write-result-header">
 							📝 内存验证: <code>{wr.plaintext}</code>
+							{#if wr.guest_confirmed}
+								<span class="write-badge safe">✅ 容器内确认存在</span>
+							{/if}
 							<span class="write-badge {wr.plaintext_found ? 'found' : 'safe'}">
 								{wr.plaintext_found ? '⚠️ 宿主机可读' : '✅ 加密保护'}
 							</span>
 						</div>
 						<div class="write-note">{wr.note}</div>
+
+						<div class="write-input-row">
+							<input class="write-input" type="text" placeholder="输入要写入的数据，留空自动生成" bind:value={(customData[key] || '')} oninput={(e) => { customData[key] = e.target.value; customData = {...customData}; }} />
+							<button class="write-act-btn" onclick={(e) => { e.stopPropagation(); writeAndRead(pod.namespace, pod.name); }} disabled={writeLoading[key]}>
+								{writeLoading[key] ? '⏳' : '📝'} 写入
+							</button>
+							<button class="write-act-btn read" onclick={(e) => { e.stopPropagation(); readMemOnly(pod.namespace, pod.name); }} disabled={writeLoading[key]}>
+								🔍 读取
+							</button>
+						</div>
 						{#if wr.memory_regions?.length}
 							<div class="write-regions">
 								<div class="write-regions-title">内存区域 (PID: {wr.host_pid} — {wr.process_name?.split(' ')[0] || 'unknown'})</div>
@@ -646,6 +676,15 @@
 	.card-wrapper:hover .act-btn { opacity: 0.5; }
 	.act-btn:hover { opacity: 1 !important; }
 	.write-btn:hover { background: #e8f5e9; }
+
+	/* 写入输入框 + 按钮行 */
+	.write-input-row { display: flex; gap: 6px; margin: 8px 0; align-items: center; }
+	.write-input { flex: 1; padding: 6px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 0.76rem; background: #f8fafc; font-family: monospace; }
+	.write-input:focus { outline: none; border-color: #4caf50; }
+	.write-act-btn { padding: 6px 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; font-size: 0.74rem; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+	.write-act-btn:hover:not(:disabled) { background: #e8f5e9; border-color: #4caf50; }
+	.write-act-btn.read:hover:not(:disabled) { background: #eff6ff; border-color: #3b82f6; }
+	.write-act-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.yaml-btn:hover { background: #e8f5e9; }
 	.del-btn:hover { background: #fee2e2; color: #ef4444; }
 	.arrow { color: #94a3b8; font-size: 0.9rem; display: inline-block; transition: transform 0.2s; }

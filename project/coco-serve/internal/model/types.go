@@ -144,5 +144,6 @@ type WriteAndReadResult struct {
 	ProcessName    string         `json:"process_name"` // 宿主机上的进程名
 	MemoryRegions  []MemoryRegion `json:"memory_regions"`
 	PlaintextFound bool           `json:"plaintext_found"` // 宿主机内存中是否找到明文
+	GuestConfirmed bool           `json:"guest_confirmed"` // 容器内确认数据存在
 	Note           string         `json:"note"`
 }

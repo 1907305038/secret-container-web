@@ -376,11 +376,12 @@ func toASCIISafe(data []byte) string {
 }
 
 // GetWriteAndRead 写入测试数据到容器，然后从宿主机读取内存进行对比
-// POST /api/demo/write-and-read  body: {"pod":"name","ns":"namespace"}
+// POST /api/demo/write-and-read  body: {"pod":"name","ns":"namespace","data":"自定义数据(可选)"}
 func GetWriteAndRead(c *gin.Context) {
 	var req struct {
-		Pod string `json:"pod" binding:"required"`
-		Ns  string `json:"ns"`
+		Pod  string `json:"pod" binding:"required"`
+		Ns   string `json:"ns"`
+		Data string `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -392,7 +393,10 @@ func GetWriteAndRead(c *gin.Context) {
 
 	result := model.WriteAndReadResult{
 		Pod:       req.Ns + "/" + req.Pod,
-		Plaintext: fmt.Sprintf("SECRET_%d", time.Now().Unix()),
+		Plaintext: req.Data,
+	}
+	if result.Plaintext == "" {
+		result.Plaintext = fmt.Sprintf("SECRET_%d", time.Now().Unix())
 	}
 
 	// 1. 写入测试数据到容器内 /dev/shm
@@ -403,6 +407,11 @@ func GetWriteAndRead(c *gin.Context) {
 		return
 	}
 	result.Plaintext = strings.TrimSpace(out)
+
+	// 3. 容器内确认：数据确实存在
+	if guestOut, err := execPodCmd(req.Pod, req.Ns, "cat /dev/shm/proof.txt"); err == nil {
+		result.GuestConfirmed = strings.TrimSpace(guestOut) == result.Plaintext
+	}
 
 	// 2. 判断是否 TDX，找对应的宿主机进程
 	isTdx := false
@@ -462,6 +471,88 @@ func GetWriteAndRead(c *gin.Context) {
 		zap.String("pod", result.Pod),
 		zap.Bool("is_tdx", result.IsTDX),
 		zap.Int("host_pid", result.HostPID),
+		zap.Bool("found", result.PlaintextFound),
+	)
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ReadMemOnly 只读取宿主机内存（不写入数据），用于验证已写入的数据
+// POST /api/demo/read-mem  body: {"pod":"name","ns":"namespace"}
+func ReadMemOnly(c *gin.Context) {
+	var req struct {
+		Pod string `json:"pod" binding:"required"`
+		Ns  string `json:"ns"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Ns == "" {
+		req.Ns = "default"
+	}
+
+	result := model.WriteAndReadResult{Pod: req.Ns + "/" + req.Pod}
+
+	// 从容器内读取已有数据
+	if guestData, err := execPodCmd(req.Pod, req.Ns, "cat /dev/shm/proof.txt 2>/dev/null"); err == nil && guestData != "" {
+		result.Plaintext = strings.TrimSpace(guestData)
+		result.GuestConfirmed = true
+	} else {
+		result.Note = "容器内无数据，请先写入"
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	// 判断是否 TDX
+	isTdx := false
+	if h != nil && h.K8s != nil {
+		if pods, _ := h.K8s.GetPods(); pods != nil {
+			for _, p := range pods {
+				if p.Name == req.Pod && p.Namespace == req.Ns {
+					isTdx = strings.Contains(p.RuntimeClass, "tdx")
+					break
+				}
+			}
+		}
+	}
+	result.IsTDX = isTdx
+
+	if isTdx {
+		qemuPID, err := findQemuPID(req.Pod, req.Ns)
+		if err != nil {
+			result.Note = "未找到 QEMU 进程"
+		} else {
+			result.HostPID = qemuPID
+			result.ProcessName = "qemu-system-x86_64"
+			result.MemoryRegions, result.PlaintextFound = scanProcessMemRegions(qemuPID, result.Plaintext)
+			if result.PlaintextFound {
+				result.Note = "⚠️ QEMU 内存中找到明文！"
+			} else {
+				result.Note = fmt.Sprintf("✅ 容器内确认: %s | 宿主机扫描 QEMU 的 %d 个区域均未找到", result.Plaintext, len(result.MemoryRegions))
+			}
+		}
+	} else {
+		hostPID, procName := findContainerHostPID(req.Pod, req.Ns)
+		if hostPID == 0 {
+			result.Note = "未找到容器进程 PID"
+		} else {
+			result.HostPID = hostPID
+			result.ProcessName = procName
+			hostPath := fmt.Sprintf("/proc/%d/root/dev/shm/proof.txt", hostPID)
+			dataFromHost, err := os.ReadFile(hostPath)
+			if err == nil && strings.TrimSpace(string(dataFromHost)) == result.Plaintext {
+				result.PlaintextFound = true
+				result.Note = fmt.Sprintf("⚠️ 宿主机读到: %s", strings.TrimSpace(string(dataFromHost)))
+			} else {
+				result.Note = "宿主机读取失败"
+			}
+			result.MemoryRegions, _ = scanProcessMemRegions(hostPID, "")
+		}
+	}
+
+	logger.Memory.Info("read mem only",
+		zap.String("pod", result.Pod),
 		zap.Bool("found", result.PlaintextFound),
 	)
 
