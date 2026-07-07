@@ -875,16 +875,26 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 			continue // 小于2MB不是虚拟机RAM
 		}
 
-		// 尝试从多个偏移读取，优先取非零数据（真实密文而非全零页）
-		offsets := []int64{start, start + 4096, start + (end-start)/4, start + (end-start)/3}
-		if end-start < 16384 {
-			offsets = []int64{start, start + 4096}
-		}
+		// 多位置扫描：开头、末尾、以及多个等分点，优先取高熵非零密文
 		readSize := 256
 		var data []byte
 		var bestOffset int64
-		for _, off := range offsets {
-			if off >= end-int64(readSize) {
+		bestEntropy := 0.0
+
+		// 生成候选偏移列表：开头、末尾、1/8 等分点
+		var candidates []int64
+		candidates = append(candidates, start) // 区域开头
+		for i := int64(1); i < 8; i++ {
+			candidates = append(candidates, start+(end-start)*i/8)
+		}
+		candidates = append(candidates, end-int64(readSize)-1) // 区域末尾
+		if end-start > 16384 {
+			candidates = append(candidates, start+4096, start+8192, start+16384) // 小偏移
+			candidates = append(candidates, end-16384, end-8192, end-4096)       // 末尾附近
+		}
+
+		for _, off := range candidates {
+			if off < start || off >= end-int64(readSize) {
 				continue
 			}
 			buf := make([]byte, readSize)
@@ -892,18 +902,12 @@ func scanTDXGuestRAM(pid int, plaintext string) ([]model.MemoryRegion, bool) {
 			if err != nil || n == 0 {
 				continue
 			}
-			data = buf[:n]
-			bestOffset = off
-			// 非全零 = 真实密文，直接使用
-			allZero := true
-			for _, b := range data {
-				if b != 0 {
-					allZero = false
-					break
-				}
-			}
-			if !allZero {
-				break
+			ent := calcEntropy(buf[:n])
+			// 优先选最高熵（最像密文）的非零数据
+			if ent > bestEntropy {
+				bestEntropy = ent
+				data = buf[:n]
+				bestOffset = off
 			}
 		}
 		if len(data) == 0 {
