@@ -505,19 +505,15 @@ func ReadMemOnly(c *gin.Context) {
 
 	result := model.WriteAndReadResult{Pod: req.Ns + "/" + req.Pod}
 
-	// 从容器内读取最新写入的数据
-	latestCmd := "cat /dev/shm/.proof_count 2>/dev/null"
-	cntStr, _ := execPodCmd(req.Pod, req.Ns, latestCmd)
-	cnt := 1
-	if cntStr != "" {
-		fmt.Sscanf(strings.TrimSpace(cntStr), "%d", &cnt)
+	// 从容器内读取最新存在的 proof 文件
+	latestCmd := "ls /dev/shm/proof_*.txt 2>/dev/null | sort -V | tail -1"
+	latestFile, err := execPodCmd(req.Pod, req.Ns, latestCmd)
+	if err != nil || latestFile == "" {
+		result.Note = "容器内无数据，请先写入"
+		c.JSON(http.StatusOK, result)
+		return
 	}
-	// 读最新文件 (cnt-1)
-	latestFile := fmt.Sprintf("/dev/shm/proof_%d.txt", cnt-1)
-	if cnt <= 1 {
-		latestFile = "/dev/shm/proof_1.txt"
-	}
-	if guestData, err := execPodCmd(req.Pod, req.Ns, "cat "+latestFile+" 2>/dev/null"); err == nil && guestData != "" {
+	if guestData, err := execPodCmd(req.Pod, req.Ns, "cat "+strings.TrimSpace(latestFile)); err == nil && guestData != "" {
 		result.Plaintext = strings.TrimSpace(guestData)
 		result.GuestConfirmed = true
 		if allFiles, err := execPodCmd(req.Pod, req.Ns, "ls /dev/shm/proof_*.txt 2>/dev/null | wc -l"); err == nil {
