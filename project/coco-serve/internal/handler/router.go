@@ -58,6 +58,10 @@ func SetupRouter() *gin.Engine {
 		api.GET("/trustee", GetTrustee)
 		api.GET("/vms", GetVMs)
 		api.GET("/vms/:pid", GetVMDetail)
+		api.POST("/vms/write-and-read", VMWriteAndRead)
+		api.POST("/vms/read-mem", VMReadMem)
+		api.POST("/vms/delete-proof", VMDeleteProof)
+		api.GET("/vms/:pid/mem", GetVMMem)
 
 		// 内存加密验证
 		demo := api.Group("/demo")
