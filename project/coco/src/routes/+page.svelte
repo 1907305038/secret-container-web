@@ -94,12 +94,15 @@
 				<div class="hw-detail">PAMT: {(d.tdx.pamt_kb / 1024 / 1024).toFixed(1)} GB</div>
 			</div>
 		</div>
-		<div class="hw-card sgx clickable" on:click|stopPropagation={() => goto('/trustee')} title="查看证明链">
-			<div class="hw-icon">📦</div>
+		<div class="hw-card cca {d.cca.enabled ? 'clickable' : ''}" title="ARM CCA 需要 ARM 平台 (如 Ampere Altra)">
+			<div class="hw-icon">🧬</div>
 			<div class="hw-info">
-				<div class="hw-name">Intel SGX <span class="hw-link">查看证明 →</span></div>
-				<div class="hw-status on">✅ {d.sgx.devices.length} 设备</div>
-				<div class="hw-detail">{d.sgx.devices.join(', ')}</div>
+				<div class="hw-name">ARM CCA <span class="hw-link">{d.cca.enabled ? '查看证明 →' : '（需要 ARM 平台）'}</span></div>
+				<div class="hw-status {d.cca.enabled ? 'on' : 'off'}">{d.cca.enabled ? '✅ Realm 可用' : '❌ ' + d.cca.arch}</div>
+				{#if d.cca.enabled}
+					<div class="hw-detail">RMM: {d.cca.rmm_available ? '✅' : '❌'} | Realm: {d.cca.realm_supported ? '✅' : '❌'}</div>
+					<div class="hw-detail">Granule: {d.cca.granule_size}</div>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -201,11 +204,11 @@
 	@media (max-width: 500px) { .hw-row { grid-template-columns: 1fr; } }
 	.hw-card { display: flex; gap: 12px; padding: 12px; border-radius: 10px; align-items: center; transition: all 0.25s; }
 	.hw-card.tdx { background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 1px solid #bbf7d0; }
-	.hw-card.sgx { background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1px solid #bfdbfe; }
+	.hw-card.cca { background: linear-gradient(135deg, #fdf4ff, #fae8ff); border: 1px solid #f0abfc; }
 	.hw-card.clickable { cursor: pointer; }
 	.hw-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
 	.hw-card.tdx.clickable:hover { box-shadow: 0 6px 20px rgba(76,175,80,0.12); }
-	.hw-card.sgx.clickable:hover { box-shadow: 0 6px 20px rgba(59,130,246,0.12); }
+	.hw-card.cca.clickable:hover { box-shadow: 0 6px 20px rgba(168,85,247,0.12); }
 	.hw-icon { font-size: 1.8rem; transition: transform 0.2s; }
 	.hw-card:hover .hw-icon { transform: scale(1.15); }
 	.hw-name { font-weight: 700; font-size: 0.9rem; color: #1e293b; }

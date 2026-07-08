@@ -3,7 +3,7 @@ package model
 // OverviewResponse 总览数据
 type OverviewResponse struct {
 	TDX  TDXStatus  `json:"tdx"`
-	SGX  SGXStatus  `json:"sgx"`
+	CCA  CCAStatus  `json:"cca"`
 	Node NodeInfo   `json:"node"`
 	K8s  K8sSummary `json:"k8s"`
 }
@@ -15,6 +15,16 @@ type TDXStatus struct {
 	ModuleInitialized bool   `json:"module_initialized"`
 }
 
+// CCAStatus ARM CCA 机密计算状态
+type CCAStatus struct {
+	Enabled        bool   `json:"enabled"`
+	Arch           string `json:"arch"`
+	RMMAvailable   bool   `json:"rmm_available"`
+	RealmSupported bool   `json:"realm_supported"`
+	GranuleSize    string `json:"granule_size"`
+}
+
+// SGXStatus 保留定义但不再用于 Overview
 type SGXStatus struct {
 	Enabled bool     `json:"enabled"`
 	Devices []string `json:"devices"`

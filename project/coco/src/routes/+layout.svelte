@@ -17,8 +17,10 @@
 		</div>
 		<a href="/" class="nav-item" class:active={currentPath === '/'}>📊 总览</a>
 		<a href="/pods" class="nav-item" class:active={currentPath === '/pods'}>🖥️ 机密容器</a>
+		<!-- 暂时隐藏
 		<a href="/runtimes" class="nav-item" class:active={currentPath === '/runtimes'}>🔄 运行时</a>
 		<a href="/trustee" class="nav-item" class:active={currentPath === '/trustee'}>🔐 证明链</a>
+		-->
 		<div class="sidebar-footer">
 			<div class="dot"></div>
 			<span>TDX · SGX · Kata</span>

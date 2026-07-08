@@ -22,7 +22,7 @@ func GetTDXStatus() model.TDXStatus {
 	}
 }
 
-// GetSGXStatus 采集 SGX 状态
+// GetSGXStatus 采集 SGX 状态（保留，但不再用于 Overview）
 func GetSGXStatus() model.SGXStatus {
 	entries, _ := os.ReadDir("/dev")
 	var devices []string
@@ -34,6 +34,37 @@ func GetSGXStatus() model.SGXStatus {
 	return model.SGXStatus{
 		Enabled: len(devices) > 0,
 		Devices: devices,
+	}
+}
+
+// GetCCAStatus 采集 ARM CCA 硬件状态
+func GetCCAStatus() model.CCAStatus {
+	// ARM CCA 仅在 arm64 平台上可用
+	arch := os.Getenv("HOSTARCH")
+	if arch == "" {
+		arch = "x86_64"
+	}
+	if arch != "arm64" {
+		return model.CCAStatus{
+			Enabled: false,
+			Arch:    "不可用 (当前: " + arch + ")",
+		}
+	}
+	// arm64 平台：检查 RMM 和 Realm 支持
+	rmm := false
+	if _, err := os.Stat("/dev/rmm"); err == nil {
+		rmm = true
+	}
+	realm := false
+	if data, err := os.ReadFile("/sys/module/kvm_arm/parameters/cca"); err == nil && strings.TrimSpace(string(data)) == "Y" {
+		realm = true
+	}
+	return model.CCAStatus{
+		Enabled:        rmm && realm,
+		Arch:           "arm64",
+		RMMAvailable:   rmm,
+		RealmSupported: realm,
+		GranuleSize:    "4KB",
 	}
 }
 

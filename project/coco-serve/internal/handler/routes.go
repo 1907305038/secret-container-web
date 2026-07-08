@@ -16,7 +16,7 @@ import (
 
 func GetOverview(c *gin.Context) {
 	tdx := collector.GetTDXStatus()
-	sgx := collector.GetSGXStatus()
+	cca := collector.GetCCAStatus()
 
 	node := model.NodeInfo{
 		Name:      hostname(),
@@ -56,7 +56,7 @@ func GetOverview(c *gin.Context) {
 
 	c.JSON(http.StatusOK, model.OverviewResponse{
 		TDX:  tdx,
-		SGX:  sgx,
+		CCA:  cca,
 		Node: node,
 		K8s:  k8s,
 	})

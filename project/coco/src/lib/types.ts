@@ -1,6 +1,7 @@
 export interface OverviewData {
 	tdx: { enabled: boolean; keyid_range: string; pamt_kb: number; module_initialized: boolean };
-	sgx: { enabled: boolean; devices: string[] };
+	cca: { enabled: boolean; arch: string; rmm_available: boolean; realm_supported: boolean; granule_size: string };
+	sgx?: { enabled: boolean; devices: string[] };
 	node: { name: string; os: string; kernel: string; arch: string; cpu_cores: number; memory_gib: number };
 	k8s: { version: string; runtime: string; pods_total: number; pods_running: number };
 }
