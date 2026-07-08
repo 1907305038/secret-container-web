@@ -167,3 +167,22 @@ type ProofEntry struct {
 	Content       string         `json:"content"`
 	MemoryRegions []MemoryRegion `json:"memory_regions,omitempty"`
 }
+
+// ConfVM 机密虚拟机
+type ConfVM struct {
+	PID         int    `json:"pid"`
+	Name        string `json:"name"`         // -name 参数值
+	VMType      string `json:"vm_type"`      // "tdx" | "cca" | "normal"
+	MemoryMB    int    `json:"memory_mb"`    // 分配内存 (MB)
+	RSSMB       int    `json:"rss_mb"`       // 实际物理内存
+	PodName     string `json:"pod_name"`     // 关联 Pod 名（空=standalone）
+	PodNS       string `json:"pod_ns"`       // 关联命名空间
+	RunningSec  int    `json:"running_sec"`  // 运行秒数
+	HostVisible bool   `json:"host_visible"` // 宿主机是否可见进程
+}
+
+// VMListResponse VM 列表
+type VMListResponse struct {
+	VMs   []ConfVM `json:"vms"`
+	Total int      `json:"total"`
+}

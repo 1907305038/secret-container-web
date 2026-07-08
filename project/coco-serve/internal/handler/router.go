@@ -56,6 +56,8 @@ func SetupRouter() *gin.Engine {
 		api.GET("/runtimes", GetRuntimes)
 		api.GET("/runtimes/:name", GetRuntimeDetail)
 		api.GET("/trustee", GetTrustee)
+		api.GET("/vms", GetVMs)
+		api.GET("/vms/:pid", GetVMDetail)
 
 		// 内存加密验证
 		demo := api.Group("/demo")

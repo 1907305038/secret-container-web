@@ -17,6 +17,7 @@
 		</div>
 		<a href="/" class="nav-item" class:active={currentPath === '/'}>📊 总览</a>
 		<a href="/pods" class="nav-item" class:active={currentPath === '/pods'}>🖥️ 机密容器</a>
+		<a href="/vms" class="nav-item" class:active={currentPath === '/vms'}>🖥️ 机密虚拟机</a>
 		<!-- 暂时隐藏
 		<a href="/runtimes" class="nav-item" class:active={currentPath === '/runtimes'}>🔄 运行时</a>
 		<a href="/trustee" class="nav-item" class:active={currentPath === '/trustee'}>🔐 证明链</a>
