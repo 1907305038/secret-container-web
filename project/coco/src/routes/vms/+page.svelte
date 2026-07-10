@@ -33,7 +33,7 @@
 
 	async function writeAndRead(pid: number) {
 		const key = String(pid);
-		if (!(customData[key] || '').trim()) { showNotify('❌ 请输入要写入的数据'); return; }
+		if (!(customData[key] || '').trim()) return;
 		writeLoading[key] = true; writeLoading = { ...writeLoading };
 		const r = await fetch('/api/vms/write-and-read', {
 			method: 'POST', headers: { 'Content-Type': 'application/json' },
