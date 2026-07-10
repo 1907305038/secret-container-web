@@ -113,3 +113,20 @@ export interface CVMEvent {
 	message: string;
 	timestamp: string;
 }
+
+// 机密虚拟机
+export interface ConfVM {
+	pid: number;
+	name: string;
+	vm_type: string;
+	tee_type: string;
+	evidence_level: string;
+	memory_mb: number;
+	rss_mb: number;
+	pod_name: string;
+	pod_ns: string;
+	running_sec: number;
+	host_visible: boolean;
+	images: string[];
+	cpu: string;
+}

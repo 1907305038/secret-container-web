@@ -71,15 +71,20 @@
 	function sizeFmt(mb: number) { return mb > 1024 ? (mb/1024).toFixed(1)+'GB' : mb+'MB'; }
 	function runFmt(s: number) { if (s < 60) return s+'秒'; if (s < 3600) return (s/60).toFixed(0)+'分钟'; if (s < 86400) return (s/3600).toFixed(1)+'小时'; return (s/86400).toFixed(1)+'天'; }
 
+	let expandedVM = $state<Record<string, boolean>>({});
+
 	$effect(() => { load(); });
 </script>
 
 <div class="page-header">
 	<h2>🖥️ 机密虚拟机</h2>
-	<div class="stats-row">
-		<div class="stat-badge">TDX VM: <b>{vms.filter((v:any) => v.vm_type === 'tdx').length}</b></div>
-		<div class="stat-badge dim">总计: <b>{total}</b></div>
-	</div>
+</div>
+
+<div class="stats-cards">
+	<div class="stat-card"><div class="stat-num">{total}</div><div class="stat-label">PodVM 总数</div></div>
+	<div class="stat-card tdx"><div class="stat-num">{vms.filter((v:any) => v.vm_type === 'tdx').length}</div><div class="stat-label">🟢 Intel TDX</div></div>
+	<div class="stat-card"><div class="stat-num">{vms.filter((v:any) => v.vm_type === 'normal').length}</div><div class="stat-label">⚪ 普通 QEMU</div></div>
+	<div class="stat-card"><div class="stat-num">{vms.filter((v:any) => v.pod_name).length}</div><div class="stat-label">📦 关联 Pod</div></div>
 </div>
 
 <div class="toolbar">
@@ -95,19 +100,25 @@
 		{#each vms as vm, i (vm.pid)}
 			{@const key = String(vm.pid)}
 			<div class="vm-card" in:fly={{ y: 10, delay: i * 40, duration: 250 }}>
-				<div class="vm-card-top">
+				<div class="vm-card-top" onclick={() => { expandedVM[key] = !expandedVM[key]; expandedVM = { ...expandedVM }; }} role="button" tabindex="0">
 					<div class="vm-left"><span class="vm-type {vm.vm_type}">{vmTypeLabel(vm.vm_type)}</span></div>
 					<div class="vm-main">
-						<div class="vm-top-row"><span class="vm-name">{vm.name || '未命名'}</span><span class="vm-pid">PID {vm.pid}</span></div>
+						<div class="vm-top-row">
+							<span class="vm-name">{vm.name || '未命名'}</span>
+							<span class="vm-pid">PID {vm.pid}</span>
+							<span class="evidence-badge {vm.evidence_level || 'inferred'}">{vm.evidence_level === 'real' ? '🟢 真实' : '🟡 推断'}</span>
+						</div>
 						<div class="vm-sub">
 							<span class="chip">内存: {sizeFmt(vm.memory_mb || 0)}</span>
 							<span class="chip">RSS: {sizeFmt(vm.rss_mb || 0)}</span>
 							<span class="chip">运行: {runFmt(vm.running_sec)}</span>
+							<span class="chip tee-chip">{vm.tee_type || '普通 QEMU'}</span>
 							{#if vm.pod_name}<span class="chip pod-chip">📦 {vm.pod_ns}/{vm.pod_name}</span>{:else}<span class="chip standalone-chip">🔧 独立</span>{/if}
 						</div>
 					</div>
 					<div class="vm-right">
-						<button class="act-btn write-btn" onclick={() => { showWriteForm[key] = !showWriteForm[key]; showWriteForm = {...showWriteForm}; }}>📝</button>
+						<button class="act-btn write-btn" onclick={(e) => { e.stopPropagation(); showWriteForm[key] = !showWriteForm[key]; showWriteForm = {...showWriteForm}; }}>📝</button>
+						<span class="arrow {expandedVM[key]?'open':''}">▸</span>
 					</div>
 				</div>
 				{#if showWriteForm[key]}
@@ -152,6 +163,19 @@
 								</div>
 							{/each}
 						{/if}
+					</div>
+				{/if}
+				{/if}
+				<!-- 展开详情 -->
+				{#if expandedVM[key]}
+					<div class="vm-detail" in:slide={{ duration: 200 }}>
+						<div class="detail-grid">
+							<div class="detail-item"><div class="dl">TEE 类型</div><pre>{vm.tee_type || '普通 QEMU'}</pre></div>
+							<div class="detail-item"><div class="dl">Evidence</div><pre>{vm.evidence_level === 'real' ? '🟢 真实系统数据' : '🟡 基于运行时推断'}</pre></div>
+							<div class="detail-item"><div class="dl">可信边界</div><pre>Guest VM 内为可信执行边界，宿主机无法访问</pre></div>
+							{#if vm.cpu}<div class="detail-item"><div class="dl">CPU</div><pre>{vm.cpu}</pre></div>{/if}
+							{#if vm.images?.length}<div class="detail-item"><div class="dl">镜像</div><pre>{vm.images.join(', ')}</pre></div>{/if}
+						</div>
 					</div>
 				{/if}
 			</div>
@@ -258,4 +282,31 @@
 	.mem-modal-info { font-size: 0.82rem; color: #475569; margin-bottom: 4px; }
 	.mem-modal-info code { background: #e2e8f0; padding: 1px 6px; border-radius: 4px; }
 	.mem-modal-empty { text-align: center; color: #94a3b8; padding: 2rem; }
+
+	/* 统计卡片 */
+	.stats-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1rem; }
+	.stat-card { background: #fff; border-radius: 10px; padding: 14px 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+	.stat-card.tdx { background: linear-gradient(135deg, #f0fdf4, #dcfce7); }
+	.stat-num { font-size: 1.6rem; font-weight: 700; color: #1e293b; }
+	.stat-label { font-size: 0.72rem; color: #64748b; margin-top: 4px; }
+
+	/* Evidence badge */
+	.evidence-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; font-weight: 500; }
+	.evidence-badge.real { background: #dcfce7; color: #166534; }
+	.evidence-badge.inferred { background: #fef9c3; color: #854d0e; }
+
+	/* TEE chip */
+	.chip.tee-chip { background: #ede9fe; color: #5b21b6; }
+
+	/* Arrow */
+	.vm-card-top { cursor: pointer; }
+	.arrow { font-size: 0.9rem; color: #94a3b8; transition: transform 0.2s; margin-left: 4px; }
+	.arrow.open { transform: rotate(90deg); }
+
+	/* 展开详情 */
+	.vm-detail { padding: 0 16px 12px; border-top: 1px solid #f1f5f9; }
+	.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+	.detail-item { background: #f8fafc; border-radius: 6px; padding: 8px 10px; }
+	.dl { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; }
+	.detail-item pre { margin: 0; font-size: 0.78rem; white-space: pre-wrap; word-break: break-all; }
 </style>

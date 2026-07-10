@@ -172,7 +172,33 @@ func GetConfVMs() []model.ConfVM {
 			}
 		}
 
-		vm.HostVisible = true // QEMU 进程宿主机可见
+		vm.HostVisible = true     // QEMU 进程宿主机可见
+		vm.EvidenceLevel = "real" // 来自 ps 真实进程
+
+		// TEE 类型推断
+		switch vm.VMType {
+		case "tdx":
+			vm.TEEType = "Intel TDX"
+		case "cca":
+			vm.TEEType = "ARM CCA"
+		default:
+			vm.TEEType = "普通 QEMU"
+		}
+
+		// 从关联 Pod 获取 images 和 cpu
+		if vm.PodName != "" {
+			podJSON, _ := exec.Command("kubectl", "get", "pod", vm.PodName, "-n", vm.PodNS,
+				"-o", "jsonpath={.spec.containers[*].image}").Output()
+			if imgs := strings.Fields(string(podJSON)); len(imgs) > 0 {
+				vm.Images = imgs
+			}
+			cpuJSON, _ := exec.Command("kubectl", "get", "pod", vm.PodName, "-n", vm.PodNS,
+				"-o", "jsonpath={.spec.containers[*].resources.requests.cpu}").Output()
+			if cpu := strings.TrimSpace(string(cpuJSON)); cpu != "" {
+				vm.CPU = cpu
+			}
+		}
+
 		vms = append(vms, vm)
 	}
 	return vms

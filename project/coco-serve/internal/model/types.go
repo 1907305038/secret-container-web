@@ -170,15 +170,19 @@ type ProofEntry struct {
 
 // ConfVM 机密虚拟机
 type ConfVM struct {
-	PID         int    `json:"pid"`
-	Name        string `json:"name"`         // -name 参数值
-	VMType      string `json:"vm_type"`      // "tdx" | "cca" | "normal"
-	MemoryMB    int    `json:"memory_mb"`    // 分配内存 (MB)
-	RSSMB       int    `json:"rss_mb"`       // 实际物理内存
-	PodName     string `json:"pod_name"`     // 关联 Pod 名（空=standalone）
-	PodNS       string `json:"pod_ns"`       // 关联命名空间
-	RunningSec  int    `json:"running_sec"`  // 运行秒数
-	HostVisible bool   `json:"host_visible"` // 宿主机是否可见进程
+	PID           int      `json:"pid"`
+	Name          string   `json:"name"`
+	VMType        string   `json:"vm_type"`        // "tdx" | "cca" | "normal"
+	TEEType       string   `json:"tee_type"`       // "Intel TDX" | "ARM CCA" | "AMD SEV" | "Kata VM" | "普通 QEMU"
+	EvidenceLevel string   `json:"evidence_level"` // "real" | "inferred"
+	MemoryMB      int      `json:"memory_mb"`
+	RSSMB         int      `json:"rss_mb"`
+	PodName       string   `json:"pod_name"`
+	PodNS         string   `json:"pod_ns"`
+	RunningSec    int      `json:"running_sec"`
+	HostVisible   bool     `json:"host_visible"`
+	Images        []string `json:"images,omitempty"`
+	CPU           string   `json:"cpu,omitempty"`
 }
 
 // VMListResponse VM 列表
