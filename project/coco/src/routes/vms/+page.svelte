@@ -55,15 +55,10 @@
 		});
 		const d = await r.json();
 		const arr = writeResults[key] || [];
-		if (!d.plaintext || d.note?.includes('无数据')) { msg = d.note || '无数据'; writeLoading[key] = false; writeLoading = { ...writeLoading }; return; }
-		if (d.entries?.length) {
-			const existing = new Set(arr.map((a: any) => a.file_name));
-			const newEntries = d.entries.filter((e: any) => !existing.has(e.file_name)).map((e: any) => ({ ...d, plaintext: e.content, file_name: e.file_name, memory_regions: e.memory_regions || d.memory_regions, guest_confirmed: true }));
-			if (newEntries.length > 0) { writeResults[key] = [...arr, ...newEntries]; writeResults = { ...writeResults }; }
-		} else {
-			const last = arr[arr.length - 1];
-			if (!last || last.plaintext !== d.plaintext) { writeResults[key] = [...arr, d]; writeResults = { ...writeResults }; }
-		}
+		if (!d.entries?.length) { writeLoading[key] = false; writeLoading = { ...writeLoading }; return; }
+		const existing = new Set(arr.map((a: any) => a.file_name));
+		const newEntries = d.entries.filter((e: any) => !existing.has(e.file_name)).map((e: any) => ({ ...d, plaintext: e.content, file_name: e.file_name, memory_regions: e.memory_regions || d.memory_regions, guest_confirmed: true }));
+		if (newEntries.length > 0) { writeResults[key] = [...arr, ...newEntries]; writeResults = { ...writeResults }; }
 		writeLoading[key] = false; writeLoading = { ...writeLoading };
 	}
 
