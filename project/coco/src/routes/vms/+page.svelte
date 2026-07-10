@@ -17,6 +17,14 @@
 	function openMemModal(vmKey: string, idx: number) { memModal = { vmKey, idx }; }
 	function closeMemModal() { memModal = null; }
 
+	let notify = $state<{ text: string } | null>(null);
+	let notifyTimer: any = null;
+	function showNotify(text: string) {
+		if (notifyTimer) clearTimeout(notifyTimer);
+		notify = { text };
+		notifyTimer = setTimeout(() => { notify = null; }, 3000);
+	}
+
 	async function load() {
 		loading = true;
 		try { const r = await fetch('/api/vms'); const d = await r.json(); vms = d.vms || []; total = d.total || 0; } catch { msg = '加载失败'; }
@@ -25,7 +33,7 @@
 
 	async function writeAndRead(pid: number) {
 		const key = String(pid);
-		if (!(customData[key] || '').trim()) { msg = '❌ 请输入要写入的数据'; return; }
+		if (!(customData[key] || '').trim()) { showNotify('❌ 请输入要写入的数据'); return; }
 		writeLoading[key] = true; writeLoading = { ...writeLoading };
 		const r = await fetch('/api/vms/write-and-read', {
 			method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -92,6 +100,15 @@
 </div>
 
 {#if msg}<div class="toast" in:fly={{ y: -8, duration: 200 }} out:fade>{msg}</div>{/if}
+
+{#if notify}
+	<div class="notify-overlay" in:fade={{ duration: 150 }} out:fade>
+		<div class="notify-modal" in:fly={{ y: -10, duration: 250 }}>
+			<span>{notify.text}</span>
+			<button onclick={() => { if (notifyTimer) clearTimeout(notifyTimer); notify = null; }}>✕</button>
+		</div>
+	</div>
+{/if}
 
 {#if loading}<div class="loading">加载中...</div>
 {:else if vms.length === 0}<div class="empty" in:fade><span>📭</span><p>暂无独立机密虚拟机</p></div>
@@ -228,6 +245,11 @@
 	.loading, .empty { text-align: center; padding: 3rem; color: #94a3b8; }
 	.empty span { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
 	.toast { background: #fef3c7; color: #92400e; padding: 8px 16px; border-radius: 8px; margin-bottom: 0.8rem; font-size: 0.85rem; }
+
+	.notify-overlay { position: fixed; top: 0; left: 0; right: 0; z-index: 2000; display: flex; justify-content: center; padding-top: 60px; }
+	.notify-modal { background: #fff; border: 1px solid #fecaca; border-radius: 12px; padding: 14px 20px; display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.15); font-size: 0.9rem; color: #dc2626; font-weight: 500; }
+	.notify-modal button { background: none; border: none; font-size: 1rem; cursor: pointer; color: #94a3b8; padding: 2px 6px; }
+	.notify-modal button:hover { color: #ef4444; }
 	.list { display: flex; flex-direction: column; gap: 8px; }
 	.vm-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); overflow: hidden; }
 	.vm-card-top { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
