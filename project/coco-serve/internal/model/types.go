@@ -186,3 +186,16 @@ type VMListResponse struct {
 	VMs   []ConfVM `json:"vms"`
 	Total int      `json:"total"`
 }
+
+// CVMDemoStatus CVM Demo 状态
+type CVMDemoStatus struct {
+	RuntimeClassDetected bool     `json:"runtime_class_detected"`
+	SelectedRuntimeClass string   `json:"selected_runtime_class"`
+	AvailableClasses     []string `json:"available_classes"`
+	DemoExists           bool     `json:"demo_exists"`
+	DemoStatus           string   `json:"demo_status"`
+	DemoNode             string   `json:"demo_node"`
+	DemoPodName          string   `json:"demo_pod_name"`
+	TeeMode              string   `json:"tee_mode"` // "real" / "dev" / "unknown"
+	Message              string   `json:"message"`
+}

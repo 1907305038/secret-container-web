@@ -265,3 +265,8 @@ func (c *Client) GetPodEvents(namespace, podName string) ([]EventItem, error) {
 	}
 	return result, nil
 }
+
+// GetPod 获取单个 Pod
+func (c *Client) GetPod(namespace, name string) (*corev1.Pod, error) {
+	return c.cs.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+}

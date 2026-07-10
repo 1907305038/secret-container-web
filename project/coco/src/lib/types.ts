@@ -92,3 +92,24 @@ export interface WriteAndReadResult {
 	plaintext_found: boolean;
 	note: string;
 }
+
+// CVM Demo 状态
+export interface CVMDemoStatus {
+	runtime_class_detected: boolean;
+	selected_runtime_class: string;
+	available_classes: string[];
+	demo_exists: boolean;
+	demo_status: string;
+	demo_node: string;
+	demo_pod_name: string;
+	tee_mode: string; // "real" | "dev" | "unknown"
+	message: string;
+}
+
+// CVM Demo 事件
+export interface CVMEvent {
+	type: string;
+	reason: string;
+	message: string;
+	timestamp: string;
+}

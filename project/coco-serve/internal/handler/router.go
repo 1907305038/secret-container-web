@@ -74,6 +74,15 @@ func SetupRouter() *gin.Engine {
 		}
 	}
 
+	// CVM Demo
+	cvm := api.Group("/cvm-demo")
+	{
+		cvm.GET("/status", GetCVMDemoStatus)
+		cvm.POST("/start", StartCVMDemo)
+		cvm.DELETE("/cleanup", CleanupCVMDemo)
+		cvm.GET("/logs", GetCVMDemoLogs)
+	}
+
 	// WebSocket 实时状态推送
 	r.GET("/ws/state", func(c *gin.Context) {
 		WsHub.HandleWS(c.Writer, c.Request)

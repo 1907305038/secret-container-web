@@ -120,6 +120,7 @@
 
 	async function writeAndRead(ns: string, name: string) {
 		const key = `${ns}/${name}`;
+		if (!(customData[key] || '').trim()) { msg = '❌ 请输入要写入的数据'; return; }
 		writeLoading[key] = true;
 		writeLoading = { ...writeLoading };
 		const r = await fetch('/api/demo/write-and-read', {
