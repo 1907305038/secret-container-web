@@ -182,7 +182,6 @@
 						{/if}
 					</div>
 				{/if}
-				{/if}
 				<!-- 展开详情 -->
 				{#if expandedVM[key]}
 					<div class="vm-detail" in:slide={{ duration: 200 }}>
