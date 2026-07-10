@@ -150,10 +150,9 @@ func GetConfVMs() []model.ConfVM {
 			vm.VMType = "normal"
 		}
 
-		// 检查是否关联 K8s Pod（读 mountinfo 匹配 Pod UID）
+		// 检查是否关联 K8s Pod（读 mountinfo 匹配 Pod UID，优先用户 Pod 而非 kata 运行时 Pod）
 		if mountInfo, err := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid)); err == nil {
 			mountStr := string(mountInfo)
-			// 用 kubectl 查所有 pod UID
 			podOut, _ := exec.Command("sh", "-c",
 				"kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{\"/\"}{.metadata.name}{\" \"}{.metadata.uid}{\"\\n\"}{end}'").Output()
 			for _, podLine := range strings.Split(string(podOut), "\n") {
@@ -167,7 +166,10 @@ func GetConfVMs() []model.ConfVM {
 						vm.PodNS = nsName[0]
 						vm.PodName = nsName[1]
 					}
-					break
+					// 优先非 kata 的 Pod（用户 Pod）
+					if !strings.Contains(vm.PodName, "kata-") {
+						break
+					}
 				}
 			}
 		}

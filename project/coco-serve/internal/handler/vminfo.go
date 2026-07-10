@@ -73,13 +73,19 @@ func VMWriteAndRead(c *gin.Context) {
 
 	// 尝试通过关联 Pod 写入数据
 	written := false
+	counter := 1
 	if isTdx {
 		vms := collector.GetConfVMs()
 		for _, vm := range vms {
 			if vm.PID == req.PID && vm.PodName != "" {
-				// 用 kubectl exec 写入数据
-				fileName := fmt.Sprintf("/dev/shm/vm_proof_%d.txt", req.PID)
-				writeCmd := fmt.Sprintf("printf '%%s' '%s' > %s && cat %s", result.Plaintext, fileName, fileName)
+				// 用计数器生成唯一文件名，防止覆盖
+				if cntStr, err := exec.Command("kubectl", "exec", vm.PodName, "-n", vm.PodNS, "--",
+					"sh", "-c", "cat /dev/shm/.vm_proof_count 2>/dev/null").Output(); err == nil {
+					fmt.Sscanf(strings.TrimSpace(string(cntStr)), "%d", &counter)
+				}
+				fileName := fmt.Sprintf("/dev/shm/vm_proof_%d.txt", counter)
+				writeCmd := fmt.Sprintf("printf '%%s' '%s' > %s && echo '%d' > /dev/shm/.vm_proof_count && cat %s",
+					result.Plaintext, fileName, counter+1, fileName)
 				out, err := exec.Command("kubectl", "exec", vm.PodName, "-n", vm.PodNS, "--", "sh", "-c", writeCmd).Output()
 				if err == nil {
 					result.Plaintext = strings.TrimSpace(string(out))
@@ -95,11 +101,12 @@ func VMWriteAndRead(c *gin.Context) {
 		result.FileName = fmt.Sprintf("(VM PID %d 无写入权限)", req.PID)
 	}
 
-	// 扫描 QEMU 内存
+	// 扫描 QEMU 内存 — 用计数器选不同区域，避免每条数据地址相同
 	allRegions, _ := scanTDXGuestRAM(req.PID, result.Plaintext)
 	if len(allRegions) > 0 {
-		idx := req.PID % len(allRegions)
-		result.MemoryRegions = []model.MemoryRegion{allRegions[idx]}
+		idx := (counter - 1) % len(allRegions)
+		wrapRound := (counter - 1) / len(allRegions)
+		result.MemoryRegions = []model.MemoryRegion{regionWithSubOffset(allRegions[idx], wrapRound)}
 	}
 	result.PlaintextFound = false
 	if isTdx {
@@ -165,11 +172,19 @@ func VMReadMem(c *gin.Context) {
 		}
 	}
 
-	// 扫描内存
+	// 扫描内存 — 给每条 entry 分配独立区域
 	allRegions, _ := scanTDXGuestRAM(req.PID, result.Plaintext)
 	if len(allRegions) > 0 {
-		idx := req.PID % len(allRegions)
-		result.MemoryRegions = []model.MemoryRegion{allRegions[idx]}
+		for i := range result.Entries {
+			idx := i % len(allRegions)
+			wrapRound := i / len(allRegions)
+			result.Entries[i].MemoryRegions = []model.MemoryRegion{regionWithSubOffset(allRegions[idx], wrapRound)}
+		}
+		lastIdx := (len(result.Entries) - 1) % len(allRegions)
+		if lastIdx < 0 {
+			lastIdx = 0
+		}
+		result.MemoryRegions = []model.MemoryRegion{allRegions[lastIdx]}
 	}
 	result.PlaintextFound = false
 	if isTdx {
