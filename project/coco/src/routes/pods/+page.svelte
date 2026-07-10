@@ -290,8 +290,15 @@
 		deletingPods = new Set(deletingPods);
 		msg = `删除 ${String(name)}...`;
 		try {
-			await fetch(`/api/pods/${ns}/${name}`, { method: 'DELETE' });
-			msg = `✅ ${String(name)} 已删除`;
+			const r = await fetch(`/api/pods/${ns}/${name}`, { method: 'DELETE' });
+			const d = await r.json();
+			if (r.ok) {
+				msg = `✅ ${String(name)} 已删除`;
+			} else {
+				msg = `❌ 删除失败: ${d.error || r.status}`;
+				deletingPods.delete(key);
+				deletingPods = new Set(deletingPods);
+			}
 		} catch (e) {
 			msg = `❌ 删除失败: ${String(e)}`;
 			deletingPods.delete(key);
